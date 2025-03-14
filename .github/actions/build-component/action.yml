@@ -33,7 +33,7 @@ runs:
   - name: build project
     id: build
     run: |
-      tool4d.app/Contents/MacOS/tool4d ./compiler/Project/compiler.4DProject --skip-onstartup --startup-method=component --user-param="${PROJECT_PATH},../../" --dataless
+      tool4d.app/Contents/MacOS/tool4d ./compiler/Project/compiler.4DProject --skip-onstartup --startup-method=component --user-param="${PROJECT_PATH},${PWD}" --dataless
       echo "product_path=${GITHUB_WORKSPACE}/Components/${NAME}.4dbase" >> $GITHUB_OUTPUT
     shell: bash     
     env: 

@@ -39,19 +39,27 @@ runs:
         echo "name=${name}" >> $GITHUB_OUTPUT
         echo "dmg_path=${GITHUB_WORKSPACE}/${name}.dmg" >> $GITHUB_OUTPUT
         echo "zip_path=${GITHUB_WORKSPACE}/${name}.zip" >> $GITHUB_OUTPUT
-        curl https://github.com/miyako/4D/blob/v1/entitlements.plist -o entitlements.plist -sL
+        curl "${entitlements_url}" -o entitlements.plist -sL
         echo "entitlements_path=${GITHUB_WORKSPACE}/entitlements.plist" >> $GITHUB_OUTPUT
       shell: bash
       env:
         path: ${{ inputs.product_path }}
+        entitlements_url: 'https://raw.githubusercontent.com/miyako/4D/v1/entitlements.plist'
   
     - name: codesign
       id: codesign
       continue-on-error: true
       run: |
         IFS=$'\n'; set -f
-        for f in $(find "${product_path}" -type f \( -perm +111 -o -name "*.dylib" -o -name "*.js" -o -name "*.json" -o -name "*.html" -o -name "*.app" -o -name "*.framework" -o -name "*.so" -o -name "*.bundle"  -o -name "*.plugin" -o -name "*.kext" \) | sort -r )
-        do codesign --verbose --options=runtime --timestamp --force --sign "${sign}" --keychain ${keychain} --entitlements "${entitlements_path}" "${f}"; 
+        for f in $(find "${product_path}" -type f \( -perm +111 -o -name "*.dylib" -o -name "*.js" -o -name "*.json" -o -name "*.html" -o -name "*.so" \) | sort -r )
+        do 
+        xattr -c "${f}"; 
+        codesign --verbose --options=runtime --timestamp --force --sign "${sign}" --keychain ${keychain} --entitlements "${entitlements_path}" "${f}"; 
+        done
+        for f in $(find "${product_path}" -type d \( -name "*.app" -o -name "*.framework" -o -name "*.bundle"  -o -name "*.plugin" -o -name "*.kext" \) | sort -r )
+        do 
+        xattr -c "${f}"; 
+        codesign --verbose --options=runtime --timestamp --force --sign "${sign}" --keychain ${keychain} --entitlements "${entitlements_path}" "${f}"; 
         done
         unset IFS; set +f
       shell: bash  

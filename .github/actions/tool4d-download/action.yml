@@ -37,7 +37,7 @@ runs:
     - name: check platform windows
       if: ${{ startsWith(inputs.platform, 'windows') }}
       run: |
-        chcp 65001 #set code page to utf-8
+        chcp 65001
         echo ("platform=windows") >> $env:GITHUB_ENV
         echo ("TOOL4D_URL="+$env:TOOL4D_URL) >> $env:GITHUB_ENV
       shell: pwsh  
@@ -56,28 +56,39 @@ runs:
     - name: check platform windows
       if: ${{ env.platform == 'windows' }}
       run: |
-        chcp 65001 #set code page to utf-8
+        chcp 65001
         echo ("TOOL4D_PLATFORM=win") >> $env:GITHUB_ENV
         echo ("TOOL4D_SUFFIX=") >> $env:GITHUB_ENV
         echo ("TOOL4D_EXECUTABLE_PATH=./tool4d/tool4d.exe") >> $env:GITHUB_ENV 
       shell: pwsh  
     
-    - name: check platform windows
-      if: ${{ env.platform == 'windows' }}
+    - name: check platform windows (20.2)
+      if: ${{ env.platform == 'windows' && inputs.version == '20.2' }}
       run: |
-        chcp 65001 #set code page to utf-8
-        echo ("TOOL4D_DOWNLOAD_URL="+$env:TOOL4D_URL+$env:TOOL4D_BRANCH+"/"+$env:TOOL4D_VERSION+"/"+$env:TOOL4D_BUILD+"/"+$env:TOOL4D_PLATFORM+"/tool4d_"+$env:TOOL4D_VERSION+"_"+$env:TOOL4D_PLATFORM+$env:TOOL4D_SUFFIX+".tar.xz") >> $env:GITHUB_ENV
+        chcp 65001
+        echo ("TOOL4D_DOWNLOAD_URL="+$env:TOOL4D_URL+$env:TOOL4D_BRANCH+"/"+$env:TOOL4D_VERSION+"/"+$env:TOOL4D_BUILD+"/"+$env:TOOL4D_PLATFORM+"/tool4d_v"+$env:TOOL4D_VERSION+"_"+$env:TOOL4D_PLATFORM+$env:TOOL4D_SUFFIX+".tar.xz") >> $env:GITHUB_ENV
       shell: pwsh  
       env:
         TOOL4D_BRANCH: ${{ inputs.branch }}
         TOOL4D_VERSION: ${{ inputs.version }}
         TOOL4D_BUILD: ${{ inputs.build }} 
+        
+    - name: check platform windows
+      if: ${{ env.platform == 'windows' && inputs.version != '20.2' }}
+      run: |
+        chcp 65001 #set code page to utf-8
+        echo ("TOOL4D_DOWNLOAD_URL="+$env:TOOL4D_URL+$env:TOOL4D_BRANCH+"/"+$env:TOOL4D_VERSION+"/"+$env:TOOL4D_BUILD+"/"+$env:TOOL4D_PLATFORM+"/tool4d_"+$env:TOOL4D_PLATFORM+$env:TOOL4D_SUFFIX+".tar.xz") >> $env:GITHUB_ENV
+      shell: pwsh  
+      env:
+        TOOL4D_BRANCH: ${{ inputs.branch }}
+        TOOL4D_VERSION: ${{ inputs.version }}
+        TOOL4D_BUILD: ${{ inputs.build }}         
 
     - name: check platform macos   
       if: ${{ (env.platform == 'macos') && (inputs.arch != 'arm') }}
       run: |
         echo "TOOL4D_PLATFORM=mac" >> $GITHUB_ENV
-        echo "TOOL4D_SUFFIX=_x86" >> $GITHUB_ENV # github macos vm runs on intel 
+        echo "TOOL4D_SUFFIX=_x86_64" >> $GITHUB_ENV # github macos vm runs on intel 
         echo "TOOL4D_EXECUTABLE_PATH=tool4d.app/Contents/MacOS/tool4d" >> $GITHUB_ENV 
       shell: bash 
       
@@ -85,12 +96,12 @@ runs:
       if: ${{ (env.platform == 'macos') && (inputs.arch == 'arm') }}
       run: |
         echo "TOOL4D_PLATFORM=mac" >> $GITHUB_ENV
-        echo "TOOL4D_SUFFIX=_arm" >> $GITHUB_ENV # github macos vm runs on intel 
+        echo "TOOL4D_SUFFIX=_arm64" >> $GITHUB_ENV # github macos vm runs on intel 
         echo "TOOL4D_EXECUTABLE_PATH=tool4d.app/Contents/MacOS/tool4d" >> $GITHUB_ENV 
       shell: bash  
       
-    - name: check platform macos  
-      if: ${{ env.platform == 'macos' }}
+    - name: macos (20.2) 
+      if: ${{ env.platform == 'macos' && inputs.version == '20.2' }}
       run: |          
         echo "TOOL4D_DOWNLOAD_URL=${TOOL4D_URL}${TOOL4D_BRANCH}/${TOOL4D_VERSION}/${TOOL4D_BUILD}/${TOOL4D_PLATFORM}/tool4d_${TOOL4D_VERSION}_${TOOL4D_PLATFORM}${TOOL4D_SUFFIX}.tar.xz" >> $GITHUB_ENV
       shell: bash
@@ -98,6 +109,16 @@ runs:
         TOOL4D_BRANCH: ${{ inputs.branch }}
         TOOL4D_VERSION: ${{ inputs.version }}
         TOOL4D_BUILD: ${{ inputs.build }} 
+
+    - name: macos
+      if: ${{ env.platform == 'macos' && inputs.version != '20.2' }}
+      run: |          
+        echo "TOOL4D_DOWNLOAD_URL=${TOOL4D_URL}${TOOL4D_BRANCH}/${TOOL4D_VERSION}/${TOOL4D_BUILD}/${TOOL4D_PLATFORM}/tool4d${TOOL4D_SUFFIX}.tar.xz" >> $GITHUB_ENV
+      shell: bash
+      env:
+        TOOL4D_BRANCH: ${{ inputs.branch }}
+        TOOL4D_VERSION: ${{ inputs.version }}
+        TOOL4D_BUILD: ${{ inputs.build }}     
 
     - name: download tool4d
       if: ${{ env.platform }}

@@ -1,0 +1,107 @@
+name: Run Tests
+description: Run unit tests
+inputs:
+  tool4d_executable_path:
+    required: true
+    type: string
+  project_path:
+    required: true
+    type: string    
+  startup_method: 
+    required: false
+    type: string
+  user_param: 
+    required: false
+    type: string       
+  skip_onstartup: 
+    required: false
+    type: boolean  
+  data: 
+    required: false
+    type: string 
+  create_data: 
+    required: false
+    type: boolean
+  dataless: 
+    dataless: false
+    type: boolean  
+outputs:
+  stdout: 
+    value: ${{ steps.test.outputs.stdout }}
+  stderr: 
+    value: ${{ steps.test.outputs.stderr }}  
+
+runs:
+  using: "composite"
+  steps:
+
+  - name: setup
+    id: setup
+    run: |
+      if [ "${skip_onstartup}" != 'true' ]; then
+      skip_onstartup=""
+      else
+      skip_onstartup="--skip-onstartup"      
+      fi
+      if [ "${create_data}" != 'true' ]; then
+      create_data=""
+      fi  
+      if [ "${dataless}" != 'true' ]; then
+      dataless=""
+      fi          
+      echo "skip_onstartup=${skip_onstartup}" >> $GITHUB_OUTPUT
+      echo "create_data=${create_data}" >> $GITHUB_OUTPUT
+      echo "dataless=${dataless}" >> $GITHUB_OUTPUT
+    shell: bash  
+    env:
+      skip_onstartup: ${{ inputs.skip_onstartup }}
+      create_data: ${{ inputs.create_data }}
+      dataless: ${{ inputs.dataless }}
+
+  - name: tool
+    if: ${{ runner.os == '' }} # this only works on macos
+    run: |
+      if [ "${TOOL4D_ARG_CREATE_DATA}" != '' ]; then
+      "${TOOL4D_EXECUTABLE_PATH}" "${TOOL4D_PROJECT_PATH}" --startup-method="${TOOL4D_PROJECT_STARTUP_METHOD}" "${TOOL4D_ARG_SKIP_ONSTARTUP}" --user-param="${TOOL4D_ARG_USER_PARAM}" --create-data
+      elif  [ "${TOOL4D_ARG_DATALESS}" != '' ]; then
+      "${TOOL4D_EXECUTABLE_PATH}" "${TOOL4D_PROJECT_PATH}" --startup-method="${TOOL4D_PROJECT_STARTUP_METHOD}" "${TOOL4D_ARG_SKIP_ONSTARTUP}" --user-param="${TOOL4D_ARG_USER_PARAM}" --dataless
+      elif  [ "${TOOL4D_ARG_DATA}" != '' ]; then
+      "${TOOL4D_EXECUTABLE_PATH}" "${TOOL4D_PROJECT_PATH}" --startup-method="${TOOL4D_PROJECT_STARTUP_METHOD}" "${TOOL4D_ARG_SKIP_ONSTARTUP}" --user-param="${TOOL4D_ARG_USER_PARAM}" --data="${TOOL4D_ARG_DATA}"  
+      fi
+    shell: bash -c "bash -e {0} 2> >(tee stderr.log >&2)"
+    env:
+      TOOL4D_EXECUTABLE_PATH: ${{ inputs.tool4d_executable_path }}
+      TOOL4D_PROJECT_PATH: ${{ inputs.project_path }}  
+      TOOL4D_PROJECT_STARTUP_METHOD: ${{ inputs.startup_method }}  
+      TOOL4D_ARG_USER_PARAM: ${{ inputs.user_param }}
+      TOOL4D_ARG_DATA: ${{ inputs.data }}
+      TOOL4D_ARG_SKIP_ONSTARTUP: ${{ steps.setup.outputs.skip_onstartup }}
+      TOOL4D_ARG_CREATE_DATA: ${{ steps.setup.outputs.create_data }}
+      TOOL4D_ARG_DATALESS: ${{ steps.setup.outputs.dataless }}
+      
+  - name: tool
+    run: |
+      if [ "${TOOL4D_ARG_CREATE_DATA}" != '' ]; then
+      "${TOOL4D_EXECUTABLE_PATH}" "${TOOL4D_PROJECT_PATH}" --startup-method="${TOOL4D_PROJECT_STARTUP_METHOD}" "${TOOL4D_ARG_SKIP_ONSTARTUP}" --user-param="${TOOL4D_ARG_USER_PARAM}" --create-data 2>stderr.log
+      elif  [ "${TOOL4D_ARG_DATALESS}" != '' ]; then
+      "${TOOL4D_EXECUTABLE_PATH}" "${TOOL4D_PROJECT_PATH}" --startup-method="${TOOL4D_PROJECT_STARTUP_METHOD}" "${TOOL4D_ARG_SKIP_ONSTARTUP}" --user-param="${TOOL4D_ARG_USER_PARAM}" --dataless 2>stderr.log
+      elif  [ "${TOOL4D_ARG_DATA}" != '' ]; then
+      "${TOOL4D_EXECUTABLE_PATH}" "${TOOL4D_PROJECT_PATH}" --startup-method="${TOOL4D_PROJECT_STARTUP_METHOD}" "${TOOL4D_ARG_SKIP_ONSTARTUP}" --user-param="${TOOL4D_ARG_USER_PARAM}" --data="${TOOL4D_ARG_DATA}" 2>stderr.log  
+      fi
+    shell: bash
+    env:
+      TOOL4D_EXECUTABLE_PATH: ${{ inputs.tool4d_executable_path }}
+      TOOL4D_PROJECT_PATH: ${{ inputs.project_path }}  
+      TOOL4D_PROJECT_STARTUP_METHOD: ${{ inputs.startup_method }}  
+      TOOL4D_ARG_USER_PARAM: ${{ inputs.user_param }}
+      TOOL4D_ARG_DATA: ${{ inputs.data }}
+      TOOL4D_ARG_SKIP_ONSTARTUP: ${{ steps.setup.outputs.skip_onstartup }}
+      TOOL4D_ARG_CREATE_DATA: ${{ steps.setup.outputs.create_data }}
+      TOOL4D_ARG_DATALESS: ${{ steps.setup.outputs.dataless }}      
+      
+  - name: test
+    id: test     
+    run: |
+      ls .
+      echo "stderr=`cat stderr.log`" >> $GITHUB_OUTPUT
+    shell: bash
