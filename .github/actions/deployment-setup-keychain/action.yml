@@ -1,16 +1,16 @@
 
 name: Create Temporary Keychain and Install Certificate
-description: 
+description:
 inputs:
    APPLE_DEVELOPER_ID_CERTIFICATE: 
      required: true
      type: string
-   APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: 
+   APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD:
      required: true
-     type: string  
-   KEYCHAIN_PASSWORD: 
+     type: string
+   KEYCHAIN_PASSWORD:
      required: true
-     type: string  
+     type: string
 outputs:
    KEYCHAIN_PATH:
      value: ${{ steps.setup.outputs.KEYCHAIN_PATH }}
@@ -19,7 +19,7 @@ outputs:
      
 runs:
   using: "composite"
-  steps:  
+  steps:
 
     - name: setup keychain
       id: setup
@@ -35,17 +35,19 @@ runs:
         security import "${CERTIFICATE_PATH}" -P "${APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD}" -t cert -f pkcs12 -k "${KEYCHAIN_PATH}" -T /usr/bin/codesign
         security find-identity -v "${KEYCHAIN_PATH}"
         security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "{$KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+        security list-keychains -s "${KEYCHAIN_PATH}"
+        security list-keychains -d user
       env:
         APPLE_DEVELOPER_ID_CERTIFICATE: ${{ inputs.APPLE_DEVELOPER_ID_CERTIFICATE }}
         APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ inputs.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
         KEYCHAIN_PASSWORD: ${{ inputs.KEYCHAIN_PASSWORD }}
-      shell: bash 
+      shell: bash
       
     - name: set default
-      id: default      
+      id: default
       if: ${{ contains(runner.name, 'Github Actions') }}
       run: |  
         security default-keychain -s "${KEYCHAIN_PATH}"
       env:
         KEYCHAIN_PATH: ${{ steps.setup.outputs.KEYCHAIN_PATH }}
-      shell: bash 
+      shell: bash
