@@ -33,6 +33,7 @@ runs:
         [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "version="+$version+"\n")
         [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "build="+$build+"\n")
         [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "arch="+$arch+"\n")
+        Get-Content $env:GITHUB_OUTPUT
       shell: powershell
       
     - name: check version step
