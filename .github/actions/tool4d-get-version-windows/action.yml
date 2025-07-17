@@ -28,16 +28,11 @@ runs:
         $version = $json.tool.version
         $build = $json.tool.build
         $arch = $json.tool.arch   
-        echo "version*" + $version
-        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "platform=$($env:platform)`n")
-        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "branch=$($env:branch)`n")
-        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "version=$($env:version)`n")
-        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "build=$($env:build)`n")
-        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "arch=$($env:arch)`n")
-      shell: powershell
-      
-    - name: check version env
-      run: echo "env is ${{ env.version }}"
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "platform="+$env:platform+"\n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "branch="+$env:branch+"\n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "version="+$env:version+"\n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "build="+$env:build+"\n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "arch="+$env:arch+"\"n")
       shell: powershell
       
     - name: check version step
