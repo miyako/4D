@@ -22,7 +22,7 @@ runs:
     - name: get values
       id: get
       run: |
-         path="$env:GITHUB_WORKSPACE/package.json"
+         $path = Join-Path $env:GITHUB_WORKSPACE "package.json"
          $json = Get-Content package.json | Out-String | ConvertFrom-Json
          $platform = $json.tool.platform
          echo ("platform="+$env:platform) >> $env:GITHUB_OUTPUT
