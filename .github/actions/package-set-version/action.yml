@@ -14,80 +14,36 @@ runs:
   using: "composite"
   steps:   
     
-    - name: git config windows
-      if: ${{ startsWith(inputs.platform, 'windows') }}
+    - name: git config 
       run: |
-        chcp 65001
-        echo ("platform=windows") >> $env:GITHUB_ENV
-        git config --local user.name "GitHub Action"
-        git config --local user.email "action@github.com"  
-      shell: powershell
-
-    - name: git config macos
-      if: ${{ startsWith(inputs.platform, 'macos') }}      
-      run: |
-        echo "platform=macos" >> $GITHUB_ENV
         git config --local user.name "GitHub Action"
         git config --local user.email "action@github.com"  
       shell: bash
       
-    - name: major windows
-      if: ${{ env.platform == 'windows' && inputs.mode == 'major' }} 
+    - name: major
+      if: ${{ inputs.mode == 'major' }} 
       run: |
         npm version major
-      shell: powershell
-
-    - name: major macos
-      if: ${{ env.platform == 'macos' && inputs.mode == 'major' }} 
-      run: |
-        npm version major
-      shell: bash      
-
-    - name: minor windows
-      if: ${{ env.platform == 'windows' && inputs.mode == 'minor' }} 
-      run: |
-        npm version minor
-      shell: powershell
+      shell: bash
       
-    - name: minor macos
-      if: ${{ env.platform == 'macos' && inputs.mode == 'minor' }} 
+    - name: minor
+      if: ${{ inputs.mode == 'minor' }} 
       run: |
         npm version minor
       shell: bash
-
-    - name: patch windows
-      if: ${{ env.platform == 'windows' && inputs.mode == 'patch' }} 
-      run: |
-        npm version patch
-      shell: powershell
       
-    - name: patch macos
-      if: ${{ env.platform == 'macos' && inputs.mode == 'patch' }} 
+    - name: patch
+      if: ${{ inputs.mode == 'patch' }} 
       run: |
         npm version patch
       shell: bash
-
-    - name: git push windows
-      if: ${{ env.platform == 'windows' }} 
-      run: |
-        git push origin
-      shell: powershell
       
-    - name: git push macos
-      if: ${{ env.platform == 'macos' }} 
+    - name: git push
       run: |
         git push origin
       shell: bash
-      
-    - id: set_pc
-      if: ${{ env.platform == 'windows' }} 
-      run: |
-        version=`cat package.json | jq -r '.version'`
-        echo ("version="+$env:version) >> $env:GITHUB_OUTPUT
-      shell: powershell 
       
     - id: set
-      if: ${{ env.platform != 'windows' }} 
       run: |
         version=`cat package.json | jq -r '.version'`
         echo "version=${version}" >> $GITHUB_OUTPUT
