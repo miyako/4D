@@ -35,7 +35,3 @@ runs:
         [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "arch="+$arch+"\n")
         Get-Content $env:GITHUB_OUTPUT
       shell: powershell
-      
-    - name: check version step
-      run: echo "output is ${{ steps.get.outputs.version }}"
-      shell: powershell
