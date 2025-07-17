@@ -48,5 +48,5 @@ runs:
       run: |
         $json = Get-Content package.json | Out-String | ConvertFrom-Json
         $version = $json.version
-        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "version="+$env:version+"\n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "version="+$version+"\n")
       shell: powershell

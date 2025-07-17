@@ -85,8 +85,8 @@ runs:
       
     - id: get  
       run: |      
-        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "tool4d_download_url=$($env:TOOL4D_DOWNLOAD_URL)`n")
-        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "tool4d_executable_path=$($env:TOOL4D_EXECUTABLE_PATH)`n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "tool4d_download_url="+$TOOL4D_DOWNLOAD_URL+"\n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "tool4d_executable_path="+$TOOL4D_EXECUTABLE_PATH+"\n")
       shell: powershell
 
     - name: ls
