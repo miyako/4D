@@ -22,13 +22,13 @@ runs:
     - name: get values
       id: get
       run: |
-         $path = Join-Path $env:GITHUB_WORKSPACE "package.json"
-         $json = Get-Content package.json | Out-String | ConvertFrom-Json
-         $platform = $json.tool.platform
-         $branch = $json.tool.branch
-         $version = $json.tool.version
-         $build = $json.tool.build
-         $arch = $json.tool.arch     
+        $path = Join-Path $env:GITHUB_WORKSPACE "package.json"
+        $json = Get-Content package.json | Out-String | ConvertFrom-Json
+        $platform = $json.tool.platform
+        $branch = $json.tool.branch
+        $version = $json.tool.version
+        $build = $json.tool.build
+        $arch = $json.tool.arch     
         [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "platform=$($env:platform)`n")
         [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "branch=$($env:branch)`n")
         [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "version=$($env:version)`n")
