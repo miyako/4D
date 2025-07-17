@@ -27,7 +27,8 @@ runs:
         $branch = $json.tool.branch
         $version = $json.tool.version
         $build = $json.tool.build
-        $arch = $json.tool.arch     
+        $arch = $json.tool.arch   
+        echo "version*" + $version
         [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "platform=$($env:platform)`n")
         [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "branch=$($env:branch)`n")
         [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "version=$($env:version)`n")
