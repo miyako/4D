@@ -28,10 +28,10 @@ runs:
         $version = $json.tool.version
         $build = $json.tool.build
         $arch = $json.tool.arch   
-        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "platform="+$platform+"`n")
-        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "branch="+$branch+"`n")
-        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "version="+$version+"`n")
-        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "build="+$build+"`n")
-        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "arch="+$arch+"`n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "platform=$platform`n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "branch=$branch`n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "version=$version`n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "build=$build`n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "arch=$arch`n")
       shell: powershell
 
