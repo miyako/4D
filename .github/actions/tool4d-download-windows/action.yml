@@ -92,5 +92,5 @@ runs:
 
     - name: ls
       run: |
-        ls .  
-      shell: bash
+        Get-ChildItem .  
+      shell: powershell
