@@ -40,7 +40,8 @@ runs:
       
     - name: git push
       run: |
-        git push origin
+        git pull --rebase origin ${{ github.ref_name }}
+        git push origin ${{ github.ref_name }}
       shell: bash
       
     - id: set
