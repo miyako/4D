@@ -46,5 +46,5 @@ runs:
     - id: set
       run: |
         version=`cat package.json | jq -r '.version'`
-        echo ("version="+"$env:version) >> $env:GITHUB_OUTPUT
+        echo ("version="+$env:version) >> $env:GITHUB_OUTPUT
       shell: powershell
