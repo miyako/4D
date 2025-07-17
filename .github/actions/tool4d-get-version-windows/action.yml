@@ -23,7 +23,7 @@ runs:
       id: get
       run: |
         $path = Join-Path $env:GITHUB_WORKSPACE "package.json"
-        $json = Get-Content package.json | Out-String | ConvertFrom-Json
+        $json = Get-Content $path | Out-String | ConvertFrom-Json
         $platform = $json.tool.platform
         $branch = $json.tool.branch
         $version = $json.tool.version
