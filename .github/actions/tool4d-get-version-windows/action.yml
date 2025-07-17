@@ -28,10 +28,10 @@ runs:
          $branch = $json.tool.branch
          $version = $json.tool.version
          $build = $json.tool.build
-         $arch = $json.tool.arch                           
-         "platform=$($env:platform)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-         "branch=$($env:branch)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-         "version=$($env:version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-         "build=$($env:build)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append                  
-         "arch=$($env:arch)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+         $arch = $json.tool.arch     
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "platform=$($env:platform)`n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "branch=$($env:branch)`n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "version=$($env:version)`n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "build=$($env:build)`n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "arch=$($env:arch)`n")
       shell: powershell
