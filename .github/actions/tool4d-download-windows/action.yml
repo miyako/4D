@@ -76,7 +76,6 @@ runs:
         TOOL4D_BUILD: ${{ inputs.build }}         
 
     - name: download tool4d
-      if: ${{ env.platform }}
       run: |    
         Invoke-WebRequest -Uri $env:TOOL4D_DOWNLOAD_URL -OutFile "tool4d.tar.xz"      
         tar xf tool4d.tar.xz
