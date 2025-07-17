@@ -35,3 +35,7 @@ runs:
         [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "build=$($env:build)`n")
         [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "arch=$($env:arch)`n")
       shell: powershell
+    - name: check version env
+        run: echo "env is ${{ env.version }}"
+    - name: check version step
+        run: echo "output is ${{ steps.get.outputs.version }}"
