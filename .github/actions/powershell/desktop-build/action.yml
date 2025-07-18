@@ -1,0 +1,43 @@
+name: Build Desktop
+description: Build Desktop for Windows
+inputs:
+  project_path:
+    required: true
+    type: string
+  build_project_path:
+    required: true
+    type: string
+  volume_desktop_path:
+    required: true
+    type: string
+  name:
+    required: true
+    type: string
+    
+outputs:
+  project_path:
+    value: ${{ inputs.project_path }}
+  build_project_path:
+    value: ${{ inputs.build_project_path }}
+  volume_desktop_path:
+    value: ${{ inputs.volume_desktop_path }}
+  name:
+    value: ${{ inputs.name }}
+  product_path:
+    value: ${{ steps.build.outputs.product_path }}
+
+runs:
+  using: "composite"
+  steps:
+  
+    - name: build desktop application
+      id: build
+      run: |
+        tool4d\tool4d.exe .\compiler\Project\compiler.4DProject --skip-onstartup --startup-method=build --user-param="$env:PROJECT_PATH,$env:BUILD_PROJECT_PATH,$env:PWD,$env:VOLUME_DESKTOP_PATH" --dataless
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "product_path=$env:GITHUB_WORKSPACE\Final Application\$env:NAME`n")
+    shell: powershell
+    env:
+      PROJECT_PATH: ${{ inputs.project_path }}
+      BUILD_PROJECT_PATH: ${{ inputs.build_project_path }}
+      VOLUME_DESKTOP_PATH: ${{ inputs.volume_desktop_path }}
+      NAME: ${{ inputs.name }}

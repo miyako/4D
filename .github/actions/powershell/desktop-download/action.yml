@@ -1,0 +1,45 @@
+name: Download Volume Desktop
+description: Download 4D Volume Desktop for Windows
+inputs:
+  unlimited_desktop_asset_id:
+    required: true
+    type: string
+  unlimited_desktop_asset_extension:
+    required: true
+    type: string
+  unlimited_desktop_asset_name:
+    required: true
+    type: string
+
+outputs:
+  unlimited_desktop_asset_id:
+   value: ${{ inputs.unlimited_desktop_asset_id }}
+  unlimited_desktop_asset_extension:
+   value: ${{ inputs.unlimited_desktop_asset_extension }}
+  unlimited_desktop_asset_name:
+   value: ${{ inputs.unlimited_desktop_asset_name }}
+  volume_desktop_path:
+   value: ${{ steps.download.outputs.volume_desktop_path }}
+
+runs:
+  using: "composite"
+  steps:
+  
+    - name: get unlimited desktop
+      id: download
+      run: |
+        $headers = @{
+        Authorization = "Bearer $env:GITHUB_TOKEN"
+        Accept = "application/octet-stream"
+        }
+        $url = "https://api.github.com/repos/$env:REPOSITORY/releases/assets/$env:UNLIMITED_DESKTOP_ASSET_ID"
+        Invoke-WebRequest -Uri $url -Headers $headers -OutFile "$env:UNLIMITED_DESKTOP_ASSET_NAME$env:UNLIMITED_DESKTOP_ASSET_EXTENSION"
+        7z x "$env:UNLIMITED_DESKTOP_ASSET_NAME$env:UNLIMITED_DESKTOP_ASSET_EXTENSION" -o"4D Volume Desktop" -y
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "volume_desktop_path=$env:GITHUB_WORKSPACE\4D Volume Desktop`n")
+    shell: powershell
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      UNLIMITED_DESKTOP_ASSET_ID: ${{ input.unlimited_desktop_asset_id }}
+      UNLIMITED_DESKTOP_ASSET_EXTENSION: ${{ input.unlimited_desktop_asset_extension }}
+      UNLIMITED_DESKTOP_ASSET_NAME: ${{ input.unlimited_desktop_asset_name }}
+      REPOSITORY: ${{ github.repository }}
