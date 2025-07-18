@@ -36,10 +36,10 @@ runs:
         Invoke-WebRequest -Uri $url -Headers $headers -OutFile "$env:UNLIMITED_DESKTOP_ASSET_NAME$env:UNLIMITED_DESKTOP_ASSET_EXTENSION"
         7z x "$env:UNLIMITED_DESKTOP_ASSET_NAME$env:UNLIMITED_DESKTOP_ASSET_EXTENSION" -o"4D Volume Desktop" -y
         [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "volume_desktop_path=$env:GITHUB_WORKSPACE\4D Volume Desktop`n")
-    shell: powershell
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      UNLIMITED_DESKTOP_ASSET_ID: ${{ input.unlimited_desktop_asset_id }}
-      UNLIMITED_DESKTOP_ASSET_EXTENSION: ${{ input.unlimited_desktop_asset_extension }}
-      UNLIMITED_DESKTOP_ASSET_NAME: ${{ input.unlimited_desktop_asset_name }}
-      REPOSITORY: ${{ github.repository }}
+      shell: powershell
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        UNLIMITED_DESKTOP_ASSET_ID: ${{ input.unlimited_desktop_asset_id }}
+        UNLIMITED_DESKTOP_ASSET_EXTENSION: ${{ input.unlimited_desktop_asset_extension }}
+        UNLIMITED_DESKTOP_ASSET_NAME: ${{ input.unlimited_desktop_asset_name }}
+        REPOSITORY: ${{ github.repository }}

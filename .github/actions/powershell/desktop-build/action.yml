@@ -36,9 +36,9 @@ runs:
         $path = (Get-Location).Path
         tool4d\tool4d.exe .\compiler\Project\compiler.4DProject --skip-onstartup --startup-method=build --user-param="$env:PROJECT_PATH,$env:BUILD_PROJECT_PATH,$path,$env:VOLUME_DESKTOP_PATH" --dataless
         [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "product_path=$env:GITHUB_WORKSPACE\Final Application\$env:NAME`n")
-    shell: powershell
-    env:
-      PROJECT_PATH: ${{ inputs.project_path }}
-      BUILD_PROJECT_PATH: ${{ inputs.build_project_path }}
-      VOLUME_DESKTOP_PATH: ${{ inputs.volume_desktop_path }}
-      NAME: ${{ inputs.name }}
+      shell: powershell
+      env:
+        PROJECT_PATH: ${{ inputs.project_path }}
+        BUILD_PROJECT_PATH: ${{ inputs.build_project_path }}
+        VOLUME_DESKTOP_PATH: ${{ inputs.volume_desktop_path }}
+        NAME: ${{ inputs.name }}
