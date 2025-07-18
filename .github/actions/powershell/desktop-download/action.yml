@@ -38,7 +38,7 @@ runs:
         $url = "https://api.github.com/repos/$env:REPOSITORY/releases/assets/$env:UNLIMITED_DESKTOP_ASSET_ID"
         Invoke-WebRequest -Uri $url -Headers $headers -OutFile "$env:UNLIMITED_DESKTOP_ASSET_NAME$env:UNLIMITED_DESKTOP_ASSET_EXTENSION"
         7z x "$env:UNLIMITED_DESKTOP_ASSET_NAME$env:UNLIMITED_DESKTOP_ASSET_EXTENSION" -o"4D Volume Desktop" -y
-        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "volume_desktop_path=$env:GITHUB_WORKSPACE\4D Volume Desktop`n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "volume_desktop_path=$env:GITHUB_WORKSPACE\4D Volume Desktop\4D Volume Desktop`n")
       shell: powershell
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
