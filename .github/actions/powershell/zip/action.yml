@@ -1,0 +1,37 @@
+name: Create Zip Archive
+description: Create Zip Archive
+inputs:
+   name:
+     required: true
+     type: string
+   product_path:
+     required: true
+     type: string
+outputs:
+   asset_path:
+     value: ${{ steps.zip.outputs.asset_path }}
+   asset_name:
+     value: ${{ steps.zip.outputs.asset_name }}
+   name:
+     value: ${{ inputs.name }}
+   product_path:
+     value: ${{ inputs.product_path }}
+     
+runs:
+  using: "composite"
+  steps:   
+
+    - name: create zip
+      id: zip
+      shell: powershell
+      run: |
+        $dst = "$env:NAME.zip"
+        if (Test-Path $dst) { Remove-Item $dst }
+        $src = "$env:PRODUCT_PATH"
+        $destination = "$env:NAME.zip"
+        Compress-Archive -Path "src" -DestinationPath "$dst"
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "asset_path=$env:GITHUB_WORKSPACE\$dst`n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "asset_name=$dst`n")
+      env:
+        NAME: ${{ inputs.name }}
+        PRODUCT_PATH: ${{ inputs.product_path }}

@@ -1,0 +1,36 @@
+name: Configure
+description: Set Semantic Versioning
+inputs:
+   mode: 
+     required: true
+     type: string
+outputs:
+   name:
+     value: ${{ steps.configure.outputs.name }}
+   project_path:
+     value: ${{ steps.configure.outputs.project_path }}
+   build_project_path:
+     value: ${{ steps.configure.outputs.build_project_path }}
+   mode:
+     value: ${{ inputs.mode }}
+
+runs:
+  using: "composite"
+  steps:   
+    
+    - name: configure
+      id: configure
+      run: |
+        chcp 65001
+        if ( $env:mode -eq "" ) {
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "mode=patch`n")
+        } else {
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "mode=$env:mode`n")
+        }
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "project_path=$env:GITHUB_WORKSPACE\$env:project_path`n")
+        $name = [System.IO.Path]::GetFileNameWithoutExtension($env:project_path)
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "name=$name`n")
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "build_project_path=$env:GITHUB_WORKSPACE\$env:build_project_path`n")
+      shell: powershell
+      env:
+        mode: ${{ inputs.mode }}
