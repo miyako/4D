@@ -29,7 +29,7 @@ runs:
         if (Test-Path $dst) { Remove-Item $dst }
         $src = "$env:PRODUCT_PATH"
         $destination = "$env:NAME.zip"
-        Compress-Archive -Path "src" -DestinationPath "$dst"
+        Compress-Archive -Path "$src" -DestinationPath "$dst"
         [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "asset_path=$env:GITHUB_WORKSPACE\$dst`n")
         [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "asset_name=$dst`n")
       env:
