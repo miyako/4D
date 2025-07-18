@@ -76,7 +76,7 @@ runs:
     - name: check platform windows
       if: ${{ env.platform == 'windows' && inputs.version != '20.2' }}
       run: |
-        chcp 65001 #set code page to utf-8
+        chcp 65001
         echo ("TOOL4D_DOWNLOAD_URL="+$env:TOOL4D_URL+$env:TOOL4D_BRANCH+"/"+$env:TOOL4D_VERSION+"/"+$env:TOOL4D_BUILD+"/"+$env:TOOL4D_PLATFORM+"/tool4d_"+$env:TOOL4D_PLATFORM+$env:TOOL4D_SUFFIX+".tar.xz") >> $env:GITHUB_ENV
       shell: pwsh  
       env:
