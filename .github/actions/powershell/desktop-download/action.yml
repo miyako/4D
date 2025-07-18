@@ -1,6 +1,9 @@
 name: Download Volume Desktop
 description: Download 4D Volume Desktop for Windows
 inputs:
+  github_token:
+    required: true
+    type: string
   unlimited_desktop_asset_id:
     required: true
     type: string
@@ -39,7 +42,7 @@ runs:
       shell: powershell
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        UNLIMITED_DESKTOP_ASSET_ID: ${{ input.unlimited_desktop_asset_id }}
-        UNLIMITED_DESKTOP_ASSET_EXTENSION: ${{ input.unlimited_desktop_asset_extension }}
-        UNLIMITED_DESKTOP_ASSET_NAME: ${{ input.unlimited_desktop_asset_name }}
+        UNLIMITED_DESKTOP_ASSET_ID: ${{ inputs.unlimited_desktop_asset_id }}
+        UNLIMITED_DESKTOP_ASSET_EXTENSION: ${{ inputs.unlimited_desktop_asset_extension }}
+        UNLIMITED_DESKTOP_ASSET_NAME: ${{ inputs.unlimited_desktop_asset_name }}
         REPOSITORY: ${{ github.repository }}
