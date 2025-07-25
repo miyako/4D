@@ -139,7 +139,3 @@ The shell on Windows is `powershell`, not `pwsh` (which may not be installed).
 Compile, build, archive, sign, notarise, staple, macOS product on self-hosted runner using the [`compiler`](https://github.com/miyako/4d-class-compiler) project.
 
 The created asset should be uploaded to GitHub by the caller workflow with its own `secrets.GITHUB_TOKEN`.
-
-e.g.
-
-https://github.com/miyako/4d-topic-cicd/blob/main/.github/workflows/publish.yml
