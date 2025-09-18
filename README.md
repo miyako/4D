@@ -76,10 +76,6 @@ jobs:
           build: ${{ matrix.TOOL4D_BUILD }}
 ```
 
-e.g.
-
-https://github.com/miyako/4d-topic-cicd/blob/main/.github/workflows/test.yml
-
 ## Remarks
 
 `curl` on Windows seem to block on the default `pwsh`. Using `shell: bash` instead.
@@ -139,7 +135,3 @@ The shell on Windows is `powershell`, not `pwsh` (which may not be installed).
 Compile, build, archive, sign, notarise, staple, macOS product on self-hosted runner using the [`compiler`](https://github.com/miyako/4d-class-compiler) project.
 
 The created asset should be uploaded to GitHub by the caller workflow with its own `secrets.GITHUB_TOKEN`.
-
-e.g.
-
-https://github.com/miyako/4d-topic-cicd/blob/main/.github/workflows/publish.yml
