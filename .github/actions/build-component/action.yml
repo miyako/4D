@@ -61,4 +61,4 @@ runs:
     env: 
       PROJECT_PATH: ${{ inputs.project_path }}   
       NAME: ${{ steps.get.outputs.name }} 
-      STARTUP_METHOD: ${{ steps.mode.startup_method }} 
+      STARTUP_METHOD: ${{ steps.mode.outputs.startup_method }} 
