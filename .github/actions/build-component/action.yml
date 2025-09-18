@@ -33,18 +33,16 @@ runs:
       path: ${{ inputs.project_path }}
 
   - name: set mode
-    id: component
-    if: ${{ inputs.pack_project == 'true' }}
+    id: mode
     run: |
+      if [ "${pack_project}" = "true" ]; then
       echo "startup_method=component" >> $GITHUB_OUTPUT
+      else
+      echo "startup_method=dependency" >> $GITHUB_OUTPUT  
+      fi
     shell: bash
-
-  - name: set mode
-    id: dependency
-    if: ${{ inputs.pack_project != 'true' }}
-    run: |
-      echo "startup_method=dependency" >> $GITHUB_OUTPUT
-    shell: bash
+    env:
+      pack_project: ${{ inputs.pack_project }}
     
   - name: checkout compiler repo
     uses: actions/checkout@v4
@@ -52,10 +50,10 @@ runs:
       repository: miyako/4d-class-compiler
       path: compiler
 
-  - name: build project (packed)
+  - name: build project
     id: build
     run: |
-      tool4d.app/Contents/MacOS/tool4d ./compiler/Project/compiler.4DProject --skip-onstartup --startup-method=${startup_method} --user-param="${PROJECT_PATH},${PWD}" --dataless
+      tool4d.app/Contents/MacOS/tool4d ./compiler/Project/compiler.4DProject --skip-onstartup --startup-method="${STARTUP_METHOD}" --user-param="${PROJECT_PATH},${PWD}" --dataless
       echo "product_path=${GITHUB_WORKSPACE}/Components/${NAME}.4dbase" >> $GITHUB_OUTPUT
       echo "pack_project=${pack_project}" >> $GITHUB_OUTPUT    
       echo "startup_method=${startup_method}" >> $GITHUB_OUTPUT 
@@ -63,3 +61,4 @@ runs:
     env: 
       PROJECT_PATH: ${{ inputs.project_path }}   
       NAME: ${{ steps.get.outputs.name }} 
+      STARTUP_METHOD: ${{ steps.mode.startup_method }} 
