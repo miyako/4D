@@ -32,15 +32,15 @@ runs:
     env:
       path: ${{ inputs.project_path }}
 
-  - name: set mode 1/2
-    id: mode
+  - name: set mode
+    id: component
     if: ${{ inputs.pack_project == 'true' }}
     run: |
       echo "startup_method=component" >> $GITHUB_OUTPUT
     shell: bash
 
-  - name: set mode 2/2
-    id: mode
+  - name: set mode
+    id: dependency
     if: ${{ inputs.pack_project != 'true' }}
     run: |
       echo "startup_method=dependency" >> $GITHUB_OUTPUT
