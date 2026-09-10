@@ -31,10 +31,10 @@ runs:
         echo -n "${APPLE_DEVELOPER_ID_CERTIFICATE}" | base64 --decode -o "${CERTIFICATE_PATH}"
         security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
         security set-keychain-settings -t 21600 "${KEYCHAIN_PATH}"
-        security unlock-keychain -p "{$KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+        security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
         security import "${CERTIFICATE_PATH}" -P "${APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD}" -t cert -f pkcs12 -k "${KEYCHAIN_PATH}" -T /usr/bin/codesign
         security find-identity -v "${KEYCHAIN_PATH}"
-        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "{$KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
         security list-keychains -s "${KEYCHAIN_PATH}"
         security list-keychains -d user
       env:
