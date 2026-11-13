@@ -1,0 +1,158 @@
+name: 4D dependencies
+description: >-
+  Emulate the 4D dependency manager. Resolves GitHub dependencies declared in
+  dependencies.json and environment4d.json, then installs them in the 4D cache
+  layout so tool4d, 4D or 4D Server can load them.
+inputs:
+  project:
+    description: Package folder or .4DProject file, relative to the workspace or absolute.
+    required: true
+  runtime:
+    description: >-
+      tool4d, 4D or 4D Server. This names the cache folder. GitHub-hosted runners accept tool4d only.
+    required: false
+    default: tool4d
+  runtime-version:
+    description: >-
+      Runtime version, e.g. 21R5 or 21.2. It anchors "version": "4d" and the lock file version.
+    required: false
+    default: ""
+  runtime-path:
+    description: Runtime executable, queried with --version when runtime-version is empty.
+    required: false
+    default: ""
+  home:
+    description: >-
+      Isolated profile root. The cache goes inside it. Point the runtime at it with the `env` output.
+      Not supported for 4D or 4D Server on Windows.
+    required: false
+    default: ""
+  dependencies-folder:
+    description: Explicit Dependencies folder. Overrides the default and the `home` location.
+    required: false
+    default: ""
+  archive-store:
+    description: >-
+      Verified archive store. Archives are re-hashed on every use. The default is on when `home` is set;
+      "none" disables it.
+    required: false
+    default: ""
+  github-token:
+    description: >-
+      Optional token for private repositories and higher rate limits. It is sent to api.github.com only.
+      A rejected token fails without an anonymous retry, as in 4D.
+    required: false
+    default: ""
+  update:
+    description: Ignore tags pinned in dependencies-lock.json.
+    required: false
+    default: "false"
+  offline:
+    description: No network. Only cached or archived tags are used.
+    required: false
+    default: "false"
+  write-lock:
+    description: Write userPreferences.<user>/dependencies-lock.json in the 4D format.
+    required: false
+    default: "true"
+  rewrite:
+    description: >-
+      Workspace copy of the package that receives an exact-tag dependencies.json (tool4d loads exact tags only).
+      Never point this at a checkout you commit from.
+    required: false
+    default: ""
+  fail-on-incomplete:
+    description: Fail the step when any dependency cannot be resolved or installed.
+    required: false
+    default: "true"
+outputs:
+  dependencies-folder:
+    description: The Dependencies folder that was populated.
+    value: ${{ steps.unix.outputs.dependencies-folder || steps.windows.outputs.dependencies-folder }}
+  home:
+    description: The isolated profile root, if any.
+    value: ${{ steps.unix.outputs.home || steps.windows.outputs.home }}
+  env:
+    description: JSON object of environment variables that point the runtime at `home`.
+    value: ${{ steps.unix.outputs.env || steps.windows.outputs.env }}
+  lock-file:
+    description: The dependencies-lock.json path, if it was written.
+    value: ${{ steps.unix.outputs.lock-file || steps.windows.outputs.lock-file }}
+  resolved:
+    description: JSON object mapping each dependency name to its resolved tag.
+    value: ${{ steps.unix.outputs.resolved || steps.windows.outputs.resolved }}
+  incomplete:
+    description: JSON list of {name, reason} for each dependency that could not be resolved or installed.
+    value: ${{ steps.unix.outputs.incomplete || steps.windows.outputs.incomplete }}
+  complete:
+    description: true when every dependency was installed.
+    value: ${{ steps.unix.outputs.complete || steps.windows.outputs.complete }}
+  report-file:
+    description: The full JSON report.
+    value: ${{ steps.unix.outputs.report-file || steps.windows.outputs.report-file }}
+runs:
+  using: composite
+  steps:
+    - name: Fetch 4D dependencies
+      id: unix
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        FD_PROJECT: ${{ inputs.project }}
+        FD_RUNTIME: ${{ inputs.runtime }}
+        FD_RUNTIME_VERSION: ${{ inputs.runtime-version }}
+        FD_RUNTIME_PATH: ${{ inputs.runtime-path }}
+        FD_HOME: ${{ inputs.home }}
+        FD_DEPENDENCIES_FOLDER: ${{ inputs.dependencies-folder }}
+        FD_ARCHIVE_STORE: ${{ inputs.archive-store }}
+        FD_UPDATE: ${{ inputs.update }}
+        FD_OFFLINE: ${{ inputs.offline }}
+        FD_WRITE_LOCK: ${{ inputs.write-lock }}
+        FD_REWRITE: ${{ inputs.rewrite }}
+        FD_FAIL_ON_INCOMPLETE: ${{ inputs.fail-on-incomplete }}
+        DEPENDENCIES_GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        python=""
+        for candidate in python3 python; do
+          if command -v "$candidate" >/dev/null 2>&1 && \
+             "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2>/dev/null; then
+            python="$candidate"; break
+          fi
+        done
+        if [[ -z "$python" ]]; then
+          echo "::error::Python 3.9 or later is required (install it on this self-hosted runner or use actions/setup-python)"
+          exit 2
+        fi
+        "$python" "$GITHUB_ACTION_PATH/fetch_dependencies.py" --action > /dev/null
+    - name: Fetch 4D dependencies
+      id: windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        FD_PROJECT: ${{ inputs.project }}
+        FD_RUNTIME: ${{ inputs.runtime }}
+        FD_RUNTIME_VERSION: ${{ inputs.runtime-version }}
+        FD_RUNTIME_PATH: ${{ inputs.runtime-path }}
+        FD_HOME: ${{ inputs.home }}
+        FD_DEPENDENCIES_FOLDER: ${{ inputs.dependencies-folder }}
+        FD_ARCHIVE_STORE: ${{ inputs.archive-store }}
+        FD_UPDATE: ${{ inputs.update }}
+        FD_OFFLINE: ${{ inputs.offline }}
+        FD_WRITE_LOCK: ${{ inputs.write-lock }}
+        FD_REWRITE: ${{ inputs.rewrite }}
+        FD_FAIL_ON_INCOMPLETE: ${{ inputs.fail-on-incomplete }}
+        DEPENDENCIES_GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        $python = $null
+        foreach ($candidate in @('python', 'python3', 'py')) {
+          if (Get-Command $candidate -ErrorAction SilentlyContinue) {
+            & $candidate -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2>$null
+            if ($LASTEXITCODE -eq 0) { $python = $candidate; break }
+          }
+        }
+        if (-not $python) {
+          Write-Output "::error::Python 3.9 or later is required (install it on this self-hosted runner or use actions/setup-python)"
+          exit 2
+        }
+        & $python (Join-Path $env:GITHUB_ACTION_PATH 'fetch_dependencies.py') --action | Out-Null
+        exit $LASTEXITCODE
