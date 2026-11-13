@@ -255,6 +255,28 @@ class Manager(Base):
         self.assertEqual(report["dependencies"]["a"]["reuse"], fd.UNVERIFIED_REUSE)
         self.assertEqual(client.calls, [])
 
+    def test_damaged_shared_cache_is_not_found_or_repaired(self):
+        self.declare({"a": {"github": "o/a", "tag": "1.0.0"}})
+        args = ["--archive-store", "none"]
+        self.run_manager(FakeGitHub(self.repos()), *args)
+        project = next((self.tmp / "home").rglob(".github/o/a/1.0.0/Project/*.4DProject"))
+        project.unlink()
+        client = FakeGitHub(self.repos())
+        report = self.run_manager(client, *args)
+        self.assertEqual([i["name"] for i in report["incomplete"]], ["a"])
+        self.assertEqual(client.calls, [])
+        self.assertFalse(project.exists())
+        item = json.loads((self.pkg / "userPreferences.u/dependencies-lock.json").read_text())["dependencies"]["a"]
+        self.assertEqual((item["tag"], item["path"], item["found"]), ("1.0.0", "", False))
+        self.assertTrue(item["htmlURL"])
+
+    def test_failed_lookup_lock_has_no_tag(self):
+        self.declare({"a": {"github": "o/missing", "tag": "1.0.0"}})
+        self.run_manager(FakeGitHub(self.repos()))
+        item = json.loads((self.pkg / "userPreferences.u/dependencies-lock.json").read_text())["dependencies"]["a"]
+        self.assertNotIn("tag", item)
+        self.assertEqual((item["htmlURL"], item["archiveURL"], item["path"], item["found"]), ("", "", "", False))
+
     def test_digest_mismatch_fails(self):
         self.declare({"a": {"github": "o/a", "tag": "1.0.0"}})
         client = FakeGitHub(self.repos())
