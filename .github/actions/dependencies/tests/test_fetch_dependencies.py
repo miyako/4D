@@ -208,6 +208,14 @@ class Manager(Base):
         self.assertEqual(report["resolved"]["b"], "21.0")
         self.assertEqual(report["warnings"], [])
 
+    def test_windows_isolation_env_creates_profile_folders(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(fd, "platform_name", return_value="windows"):
+            home = Path(directory)
+            env = fd.isolation_env(home)
+            self.assertEqual(env["USERPROFILE"], str(home))
+            for key in ("LOCALAPPDATA", "APPDATA"):
+                self.assertTrue(Path(env[key]).is_dir())
+
     def test_environment4d_overrides_and_components_precedence(self):
         self.declare({"a": {"github": "o/a", "tag": "1.0.0"}})
         (self.pkg / "environment4d.json").write_text(json.dumps({"dependencies": {"a": {"github": "o/a", "tag": "1.2.0"}}}))

@@ -438,9 +438,12 @@ def isolation_env(home: Path) -> dict:
     if plat == "macos":
         return {"HOME": str(home), "CFFIXED_USER_HOME": str(home)}
     if plat == "windows":
-        # The set Phase A W6 showed tool4d honouring on Windows.
-        return {"USERPROFILE": str(home), "HOME": str(home),
-                "LOCALAPPDATA": str(home / "AppData" / "Local"), "APPDATA": str(home / "AppData" / "Roaming")}
+        # tool4d needs USERPROFILE as well as LOCALAPPDATA/APPDATA, and quits silently without
+        # loading the project when either AppData folder is missing (dependencies-debug run 43464410687).
+        local, roaming = home / "AppData" / "Local", home / "AppData" / "Roaming"
+        local.mkdir(parents=True, exist_ok=True)
+        roaming.mkdir(parents=True, exist_ok=True)
+        return {"USERPROFILE": str(home), "HOME": str(home), "LOCALAPPDATA": str(local), "APPDATA": str(roaming)}
     return {"HOME": str(home), "XDG_CACHE_HOME": str(home / ".cache")}
 
 

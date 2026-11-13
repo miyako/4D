@@ -50,7 +50,7 @@ Each rule below follows what real 4D does. The evidence IDs refer to experiments
 | `environment4d.json` in the package folder or a parent folder overrides `dependencies.json`. | 4D docs |
 | A rejected token (401, or 403 such as SAML enforcement) fails without an anonymous retry. | D15 |
 | tool4d loads exact `tag` entries only and does not recurse, hence `rewrite`. | E-series |
-| tool4d honours `HOME`/`CFFIXED_USER_HOME` (macOS) and `USERPROFILE`/`HOME`/`LOCALAPPDATA`/`APPDATA` (Windows). Real 4D on Windows ignores these overrides. | E-series, W1 |
+| tool4d honours `HOME`/`CFFIXED_USER_HOME` (macOS) and `USERPROFILE`, `LOCALAPPDATA` and `APPDATA` together (Windows; both AppData folders must exist or tool4d quits without loading). Real 4D on Windows ignores these overrides. | E-series, W1, W6, debug run 43464410687 |
 
 GitLab dependencies are reported as incomplete. Local-path dependencies are reported with `source: local` and left to the
 caller.
