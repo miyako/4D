@@ -1,0 +1,46 @@
+name: Create Archive from Disk Image
+description: Create .zip from the contents of .dmg
+inputs:
+   dmg_path: 
+     required: true
+     type: string
+   zip_path: 
+     required: true
+     type: string     
+outputs:
+   dmg_path:
+     value: ${{ inputs.dmg_path }}
+   zip_path:
+     value: ${{ steps.create.outputs.zip_path }}
+   name:
+     value: ${{ steps.get.outputs.name }}
+
+runs:
+  using: "composite"
+  steps:  
+
+    - name: get name
+      id: get
+      run: |
+        fullname=${path##*/}
+        name=${fullname%.*}
+        echo "name=${name}" >> $GITHUB_OUTPUT
+      shell: bash
+      env:
+        path: ${{ inputs.dmg_path }}
+
+    - name: create zip 
+      id: create
+      run: |
+        mountpoint="${RUNNER_TEMP}/mountpoint"
+        folder_path="${RUNNER_TEMP}/${name}"
+        hdiutil attach -nobrowse -noverify "${dmg_path}" -mountpoint "${mountpoint}"
+        cp -a "${mountpoint}" "${folder_path}"
+        ditto -c -k "${folder_path}" "${zip_path}"
+        diskutil unmount "${mountpoint}"
+        echo "zip_path=${zip_path}" >> $GITHUB_OUTPUT
+      shell: bash
+      env:
+        dmg_path: ${{ inputs.dmg_path }}
+        zip_path: ${{ inputs.zip_path }}
+        name: ${{ steps.get.outputs.name }}

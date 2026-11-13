@@ -12,6 +12,10 @@ on:
     outputs:
        upload_url:
          value: ${{ jobs.create.outputs.upload_url }}
+       mode:
+         value: ${{ inputs.mode }}  
+       version:
+         value: ${{ inputs.version }}  
          
 env:
 
@@ -26,7 +30,6 @@ jobs:
       upload_url: ${{ steps.release.outputs.upload_url }}
     steps:
       - name: set version
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.version != null }}
         run: |
           echo "RELEASE_NAME=${VERSION}" >> $GITHUB_ENV
           echo "TAG_NAME=${MODE}-${VERSION}" >> $GITHUB_ENV

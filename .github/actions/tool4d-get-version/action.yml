@@ -1,0 +1,36 @@
+name: Get Tool Version
+description: Read tool4d version parameters from package.json
+inputs:
+   build_project_name: 
+      required: true
+      type: string  
+outputs:
+   platform: 
+     value: ${{ steps.get.outputs.platform }}
+   branch: 
+     value: ${{ steps.get.outputs.branch }}
+   version: 
+     value: ${{ steps.get.outputs.version }}
+   build: 
+     value: ${{ steps.get.outputs.build }}  
+   arch: 
+     value: ${{ steps.get.outputs.arch }} 
+     
+runs:
+  using: "composite"
+  steps:   
+    - name: get values
+      id: get
+      run: |
+         path="${GITHUB_WORKSPACE}/package.json"
+         platform=$(cat "${path}" | jq -r '.tool.platform')
+         echo "platform=${platform}" >> $GITHUB_OUTPUT
+         branch=$(cat "${path}" | jq -r '.tool.branch')
+         echo "branch=${branch}" >> $GITHUB_OUTPUT
+         version=$(cat "${path}" | jq -r '.tool.version')
+         echo "version=${version}" >> $GITHUB_OUTPUT
+         build=$(cat "${path}" | jq -r '.tool.build')
+         echo "build=${build}" >> $GITHUB_OUTPUT
+         arch=$(cat "${path}" | jq -r '.tool.arch')
+         echo "arch=${arch}" >> $GITHUB_OUTPUT
+      shell: bash  

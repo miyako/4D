@@ -1,0 +1,35 @@
+name: Configure
+description: Set Semantic Versioning
+inputs:
+   mode: 
+     required: true
+     type: string
+outputs:
+   name:
+     value: ${{ steps.configure.outputs.name }}
+   project_path:
+     value: ${{ steps.configure.outputs.project_path }}
+   build_project_path:
+     value: ${{ steps.configure.outputs.build_project_path }}
+   mode:
+     value: ${{ inputs.mode }}
+
+runs:
+  using: "composite"
+  steps:   
+    
+    - name: configure
+      id: configure
+      run: |
+        if [ "${mode}" = "" ]; then
+        echo "mode=patch" >> $GITHUB_OUTPUT
+        else
+        echo "mode=${mode}" >> $GITHUB_OUTPUT
+        fi
+        echo "project_path=${GITHUB_WORKSPACE}/${project_path}" >> $GITHUB_OUTPUT 
+        name="${project_path%.*}"
+        echo "build_project_path=${GITHUB_WORKSPACE}/${build_project_path}" >> $GITHUB_OUTPUT 
+        echo "name=${name}" >> $GITHUB_OUTPUT
+      shell: bash
+      env:
+        mode: ${{ inputs.mode }}

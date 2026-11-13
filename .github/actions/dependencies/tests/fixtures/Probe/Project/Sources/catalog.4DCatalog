@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE base SYSTEM "http://www.4d.com/dtd/2007/base.dtd" >
+<base name="Probe" uuid="3CB76D983F0343D989D7E3E32B8CF3DD" collation_locale="ja">
+	<schema name="DEFAULT_SCHEMA"/>
+</base>

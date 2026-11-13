@@ -1,0 +1,91 @@
+name: Codesign Product
+description: Submit product to notary
+inputs:
+  sign:
+    required: true
+    type: string
+  keychain:
+    required: true
+    type: string
+  apple_id:
+    required: true
+    type: string 
+  team_id:
+    required: true
+    type: string 
+  password:
+    required: true
+    type: string 
+  product_path:
+    required: true
+    type: string 
+outputs:
+  product_path: 
+    value: ${{ inputs.product_path }}
+  dmg_path: 
+    value: ${{ steps.setup.outputs.dmg_path }}
+  zip_path: 
+    value: ${{ steps.setup.outputs.zip_path }}  
+
+runs:
+  using: "composite"
+  steps:
+
+    - name: setup
+      id: setup
+      run: |
+        fullname=${path##*/}
+        name=${fullname%.*}
+        echo "name=${name}" >> $GITHUB_OUTPUT
+        echo "dmg_path=${GITHUB_WORKSPACE}/${name}.dmg" >> $GITHUB_OUTPUT
+        echo "zip_path=${GITHUB_WORKSPACE}/${name}.zip" >> $GITHUB_OUTPUT
+        curl "${entitlements_url}" -o entitlements.plist -sL
+        echo "entitlements_path=${GITHUB_WORKSPACE}/entitlements.plist" >> $GITHUB_OUTPUT
+      shell: bash
+      env:
+        path: ${{ inputs.product_path }}
+        entitlements_url: 'https://raw.githubusercontent.com/miyako/4D/v1/entitlements.plist'
+  
+    - name: codesign
+      id: codesign
+      continue-on-error: true
+      run: |
+        IFS=$'\n'; set -f
+        for f in $(find "${product_path}" -type f \( -perm +111 -o -name "*.dylib" -o -name "*.js" -o -name "*.json" -o -name "*.html" -o -name "*.so" \) | sort -r )
+        do 
+        xattr -c "${f}"; 
+        codesign --verbose --options=runtime --timestamp --force --sign "${sign}" --keychain "${keychain}" --entitlements "${entitlements_path}" "${f}"; 
+        done
+        for f in $(find "${product_path}" -type d \( -name "*.app" -o -name "*.framework" -o -name "*.bundle"  -o -name "*.plugin" -o -name "*.kext" \) | sort -r )
+        do 
+        xattr -c "${f}"; 
+        codesign --verbose --options=runtime --timestamp --force --sign "${sign}" --keychain "${keychain}" --entitlements "${entitlements_path}" "${f}"; 
+        done
+        unset IFS; set +f
+      shell: bash  
+      env:
+        sign: ${{ inputs.sign }}
+        keychain: ${{ inputs.keychain }}
+        product_path: ${{ inputs.product_path }}
+        entitlements_path: ${{ steps.setup.outputs.entitlements_path }}
+        
+    - name: hdiutil
+      id: hdiutil
+      run: |
+        rm -f "${dmg_path}"
+        hdiutil create -format UDBZ -plist -srcfolder "${product_path}" "${dmg_path}"
+      shell: bash  
+      env:
+        product_path: ${{ inputs.product_path }}
+        dmg_path: ${{ steps.setup.outputs.dmg_path }}
+
+    - name: notarytool
+      id: notarytool
+      run: |
+        xcrun notarytool submit "${dmg_path}" --apple-id "${apple_id}" --team-id "${team_id}" --password "${password}"  --wait
+      shell: bash  
+      env:
+        apple_id: ${{ inputs.apple_id }}   
+        team_id: ${{ inputs.team_id }}  
+        password: ${{ inputs.password }}  
+        dmg_path: ${{ steps.setup.outputs.dmg_path }}

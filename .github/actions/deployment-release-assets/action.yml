@@ -1,0 +1,73 @@
+name: Create Release and Upload Files
+description: Upload .zip and .dmg to Releases
+inputs:
+   dmg_path: 
+     required: true
+     type: string
+   zip_path: 
+     required: true
+     type: string  
+   tag_name: 
+     required: true
+     type: string  
+   release_name: 
+     required: true
+     type: string  
+outputs:
+   dmg_path:
+     value: ${{ inputs.dmg_path }}
+   zip_path:
+     value: ${{ inputs.zip_path }}
+   tag_name:
+     value: ${{ inputs.tag_name }}
+   release_name:
+     value: ${{ inputs.release_name }}
+   upload_url:
+     value: ${{ steps.release.outputs.upload_url }}  
+     
+runs:
+   using: "composite"
+   steps:  
+
+   - name: get dmg name
+     id: dmg
+     run: |
+       fullname=${path##*/}
+       echo "fullname=${fullname}" >> $GITHUB_OUTPUT
+     env:
+       path: ${{ inputs.dmg_path }}
+     shell: bash  
+
+   - name: get zip name
+     id: zip
+     run: |
+       fullname=${path##*/}
+       echo "fullname=${fullname}" >> $GITHUB_OUTPUT
+     shell: bash
+     env:
+       path: ${{ inputs.zip_path }}
+        
+   - name: create release
+     id: release
+     uses: actions/create-release@v1
+     with:
+       tag_name: ${{ inputs.tag_name }}
+       release_name: ${{ inputs.release_name }}
+       draft: false
+       prerelease: false 
+
+   - name: upload dmg
+     uses: actions/upload-release-asset@v1
+     with:
+       upload_url: ${{ steps.release.outputs.upload_url }}
+       asset_path: ${{ inputs.dmg_path }}
+       asset_name: ${{ steps.dmg.outputs.fullname }}
+       asset_content_type: application/octet-stream 
+
+   - name: upload zip
+     uses: actions/upload-release-asset@v1
+     with:
+       upload_url: ${{ steps.release.outputs.upload_url }}
+       asset_path: ${{ inputs.zip_path }}
+       asset_name: ${{ steps.zip.outputs.fullname }}
+       asset_content_type: application/zip

@@ -1,0 +1,58 @@
+name: Build Application
+description: 
+inputs:
+   build_project_name: 
+      required: true
+      type: string  
+   build_agent: 
+      required: true
+      type: string  
+   build_dir: 
+      required: true
+      type: string     
+   build_project_path: 
+      required: true
+      type: string     
+   build_settings_path: 
+      required: true
+      type: string     
+   platform: 
+      required: true
+      type: string     
+outputs: 
+    compiler_component_path:
+      value: ${{ steps.setup.outputs.compiler_component_path }}
+    
+runs:
+  using: "composite"
+  steps:
+
+  - id: setup
+    uses: miyako/4D/.github/actions/install-compiler-component/@v1
+    with:
+      build_project_name: ${{ inputs.build_project_name }}
+      platform: ${{ inputs.platform }}
+
+  - name: compile project macos
+    if: ${{ startsWith(inputs.platform, 'macos') }}
+    run: |
+      "${BUILD_AGENT}" "./${BUILD_PROJECT_PATH}" --user-param="${PWD}/${BUILD_SETTINGS_PATH},../../../../${BUILD_DIR}" --headless --skip-onstartup --startup-method=compiler_build_application --dataless
+    shell: bash
+    env:  
+      BUILD_AGENT: ${{ inputs.build_agent }}
+      BUILD_DIR: ${{ inputs.build_dir }}
+      BUILD_PROJECT_PATH: ${{ inputs.build_project_path }}
+      BUILD_SETTINGS_PATH: ${{ inputs.build_settings_path }}
+
+  - name: compile project windows
+    if: ${{ startsWith(inputs.platform, 'windows') }}
+    run: |
+      $build_project_path = Join-Path -Path "$PWD" -ChildPath "$env:BUILD_PROJECT_PATH"
+      $build_settings_path = Join-Path -Path "$PWD" -ChildPath "$env:BUILD_SETTINGS_PATH"          
+      & "$env:BUILD_AGENT" "$build_project_path" --user-param="$build_settings_path,../../../../$env:BUILD_DIR" --headless --skip-onstartup --startup-method=compiler_build_application --dataless
+    shell: powershell
+    env:  
+      BUILD_AGENT: ${{ inputs.build_agent }}
+      BUILD_DIR: ${{ inputs.build_dir }}
+      BUILD_PROJECT_PATH: ${{ inputs.build_project_path }}
+      BUILD_SETTINGS_PATH: ${{ inputs.build_settings_path }}

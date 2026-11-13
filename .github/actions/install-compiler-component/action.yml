@@ -1,0 +1,48 @@
+name: Install miyako/4d-class-compiler as Component
+description: 
+inputs:
+   build_project_name: 
+      required: true
+      type: string  
+   platform: 
+      required: true
+      type: string  
+outputs: 
+    compiler_component_path:
+      value: ${{ steps.get.outputs.compiler_component_path }}
+    
+runs:
+  using: "composite"
+  steps:
+
+  - name: check platform windows
+    if: ${{ startsWith(inputs.platform, 'windows') }}
+    run: |
+      $OutputEncoding = [System.Text.Encoding]::GetEncoding('utf-8')
+      echo ("platform=windows") >> $env:GITHUB_ENV
+      echo ("compiler_component_path="+$env:BUILD_PROJECT_NAME+"/Components/compiler.4dbase") >> $env:GITHUB_ENV      
+    shell: powershell
+    env:  
+      BUILD_PROJECT_NAME: ${{ inputs.build_project_name }}
+      
+  - name: check platform macos
+    if: ${{ startsWith(inputs.platform, 'macos') }}
+    run: |
+      echo "platform=macos" >> $GITHUB_ENV    
+      echo "compiler_component_path=${BUILD_PROJECT_NAME}/Components/compiler.4dbase" >> $GITHUB_ENV
+    shell: bash
+    env:  
+      BUILD_PROJECT_NAME: ${{ inputs.build_project_name }}
+    
+  - name: checkout compiler repo
+    uses: actions/checkout@v4
+    with:
+      repository: miyako/4d-class-compiler
+      path: ${{ env.compiler_component_path }}
+
+   - id: get  
+      run: |
+        echo "compiler_component_path=${COMPILER_COMPONENT_PATH}" >> $GITHUB_OUTPUT
+      shell: bash
+      env:
+        COMPILER_COMPONENT_PATH: ${{ env.compiler_component_path }}
