@@ -626,8 +626,12 @@ class Manager:
         meta_path = repo_folder / f"{tag}.json"
         if self.archive_store is None and target.is_dir() and meta_path.is_file():
             meta = load_json(meta_path)
-            entry.update(source="cache", reuse=UNVERIFIED_REUSE, path=str(target))
             entry.update({k: meta.get(k) for k in ("htmlURL", "archiveURL", "archiveSize", "dependencies")})
+            if not package_form(target):
+                # W5: 4D keeps the metadata but neither loads nor repairs a damaged cache folder.
+                raise Failure(f"cached {repo}@{tag} is not a loadable package and 4D does not repair it; "
+                              f"delete {target} to re-fetch")
+            entry.update(source="cache", reuse=UNVERIFIED_REUSE, path=str(target))
             return
         repo_folder.mkdir(parents=True, exist_ok=True)
         source = "download"
@@ -732,6 +736,10 @@ class Manager:
             for key in ("version", "tag", "htmlURL", "archiveURL", "archiveSize"):
                 if entry.get(key) is not None:
                     item[key] = entry[key]
+            if entry.get("error") and not entry.get("htmlURL"):
+                # W15: without release metadata 4D writes no tag and empty URLs.
+                item.pop("tag", None)
+                item.update(htmlURL="", archiveURL="")
             item["path"] = native_path(Path(entry["path"])) if entry.get("path") else ""
             item["dependencies"] = entry.get("dependencies")
             item["found"] = bool(entry.get("path")) and not entry.get("error")
