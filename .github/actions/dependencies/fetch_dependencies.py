@@ -3,7 +3,7 @@
 
 Resolves `Project/Sources/dependencies.json` (+ `environment4d.json`), downloads
 release archives and installs them in the cache layout 4D uses, so that tool4d
-(which never fetches) or 4D/4D Server can load them. Stdlib only, Python >= 3.9.
+(which never fetches) or 4D/4D Server can load them. Stdlib only, Python >= 3.10.
 See README.md beside this file for the observed 4D behaviour each rule follows.
 """
 from __future__ import annotations
@@ -438,7 +438,9 @@ def isolation_env(home: Path) -> dict:
     if plat == "macos":
         return {"HOME": str(home), "CFFIXED_USER_HOME": str(home)}
     if plat == "windows":
-        return {"LOCALAPPDATA": str(home / "AppData" / "Local"), "APPDATA": str(home / "AppData" / "Roaming")}
+        # The set Phase A W6 showed tool4d honouring on Windows.
+        return {"USERPROFILE": str(home), "HOME": str(home),
+                "LOCALAPPDATA": str(home / "AppData" / "Local"), "APPDATA": str(home / "AppData" / "Roaming")}
     return {"HOME": str(home), "XDG_CACHE_HOME": str(home / ".cache")}
 
 

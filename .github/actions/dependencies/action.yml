@@ -115,12 +115,12 @@ runs:
         python=""
         for candidate in python3 python; do
           if command -v "$candidate" >/dev/null 2>&1 && \
-             "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2>/dev/null; then
+             "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null; then
             python="$candidate"; break
           fi
         done
         if [[ -z "$python" ]]; then
-          echo "::error::Python 3.9 or later is required (install it on this self-hosted runner or use actions/setup-python)"
+          echo "::error::Python 3.10 or later is required (install it on this self-hosted runner or use actions/setup-python)"
           exit 2
         fi
         "$python" "$GITHUB_ACTION_PATH/fetch_dependencies.py" --action > /dev/null
@@ -146,12 +146,12 @@ runs:
         $python = $null
         foreach ($candidate in @('python', 'python3', 'py')) {
           if (Get-Command $candidate -ErrorAction SilentlyContinue) {
-            & $candidate -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2>$null
+            & $candidate -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>$null
             if ($LASTEXITCODE -eq 0) { $python = $candidate; break }
           }
         }
         if (-not $python) {
-          Write-Output "::error::Python 3.9 or later is required (install it on this self-hosted runner or use actions/setup-python)"
+          Write-Output "::error::Python 3.10 or later is required (install it on this self-hosted runner or use actions/setup-python)"
           exit 2
         }
         & $python (Join-Path $env:GITHUB_ACTION_PATH 'fetch_dependencies.py') --action | Out-Null

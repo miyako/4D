@@ -18,7 +18,7 @@ Why it exists: tool4d has no dependency manager. It loads components that are al
 ```
 
 Then run tool4d with the variables in the `env` output (a JSON object), e.g. `HOME` and `CFFIXED_USER_HOME` on macOS, or
-`LOCALAPPDATA` and `APPDATA` on Windows. The action needs Python 3.9 or later; it uses only the standard library.
+`USERPROFILE`, `HOME`, `LOCALAPPDATA` and `APPDATA` on Windows. The action needs Python 3.10 or later; it uses only the standard library.
 The script, `fetch_dependencies.py`, also runs on its own: `python fetch_dependencies.py --help`.
 
 ## Inputs and outputs
@@ -50,7 +50,7 @@ Each rule below follows what real 4D does. The evidence IDs refer to experiments
 | `environment4d.json` in the package folder or a parent folder overrides `dependencies.json`. | 4D docs |
 | A rejected token (401, or 403 such as SAML enforcement) fails without an anonymous retry. | D15 |
 | tool4d loads exact `tag` entries only and does not recurse, hence `rewrite`. | E-series |
-| tool4d honours `HOME`/`CFFIXED_USER_HOME` (macOS) and `LOCALAPPDATA`/`APPDATA` (Windows). Real 4D on Windows ignores the latter. | E-series, W1 |
+| tool4d honours `HOME`/`CFFIXED_USER_HOME` (macOS) and `USERPROFILE`/`HOME`/`LOCALAPPDATA`/`APPDATA` (Windows). Real 4D on Windows ignores these overrides. | E-series, W1 |
 
 GitLab dependencies are reported as incomplete. Local-path dependencies are reported with `source: local` and left to the
 caller.
