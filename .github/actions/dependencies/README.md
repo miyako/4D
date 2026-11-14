@@ -37,7 +37,7 @@ and 4D 21R5 (build 100156) on macOS, headless with an isolated home folder; case
 way. Both are recorded in [#5](https://github.com/miyako/4D/pull/5) and [#6](https://github.com/miyako/4D/issues/6). The
 combination cases L1–L5, F1–F7, T1–T4, V1, V2, E1, A1 and A2 (two local components declaring the same GitHub dependency
 differently) were run against 4D 21.2 in the same way and are recorded in [#8](https://github.com/miyako/4D/pull/8); G1–G3 and
-M1–M5 (no common release, three declarations) likewise, recorded in the pull request that added them.
+M1–M5 (no common release, three declarations) likewise, recorded in [#9](https://github.com/miyako/4D/pull/9).
 
 | Rule | Evidence |
 | --- | --- |
