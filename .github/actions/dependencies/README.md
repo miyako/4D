@@ -37,7 +37,8 @@ and 4D 21R5 (build 100156) on macOS, headless with an isolated home folder; case
 way. Both are recorded in [#5](https://github.com/miyako/4D/pull/5) and [#6](https://github.com/miyako/4D/issues/6). The
 combination cases L1–L5, F1–F7, T1–T4, V1, V2, E1, A1 and A2 (two local components declaring the same GitHub dependency
 differently) were run against 4D 21.2 in the same way and are recorded in [#8](https://github.com/miyako/4D/pull/8); G1–G3 and
-M1–M5 (no common release, three declarations) likewise, recorded in [#9](https://github.com/miyako/4D/pull/9).
+M1–M5 (no common release, three declarations) likewise, recorded in [#9](https://github.com/miyako/4D/pull/9); the cycle cases
+Y1–Y4 likewise.
 
 | Rule | Evidence |
 | --- | --- |
@@ -57,6 +58,7 @@ M1–M5 (no common release, three declarations) likewise, recorded in [#9](https
 | A relative `path` in `dependencies.json` resolves from the folder that contains the project package, also when a local component declares it. A relative `path` in `environment4d.json` resolves from that file's folder. | R1–R3, R6–R8 |
 | The lock file lists local components with `path`, `found` and their `dependencies` (local ones by their resolved `path` and `found`). A missing one has `path: ""` and `found: false`. | C6ctl, R3, R5, R8 |
 | How 4D resolves a `path` declared by a GitHub component has not been observed. It is not resolved, with a warning. | – |
+| Cycles between components (X → Y → X, X → X, X → Y → Z → X) are resolved without error: each component is loaded once, and dependencies declared inside the cycle are still resolved. | Y1–Y4 |
 | A tag pinned in `dependencies-lock.json` is reused while the declaration is unchanged. `update` ignores pins. | D11, D12, W9, W11 |
 | Offline, a range or `latest` without a pin fails. There is no fallback to an older cached tag. | D10 |
 | Old tags are never removed from the cache. | D9 |
@@ -66,6 +68,11 @@ M1–M5 (no common release, three declarations) likewise, recorded in [#9](https
 | A cached tag folder that is no longer a package (for example, its `.4DZ` was deleted) is not loaded and not repaired. The lock keeps the cached `tag` and URLs with `path: ""` and `found: false`, and the dependency is incomplete. | D5, W5 |
 | tool4d loads exact `tag` entries only and does not recurse, hence `rewrite`. | E-series |
 | tool4d honours `HOME`/`CFFIXED_USER_HOME` (macOS) and `USERPROFILE`, `LOCALAPPDATA` and `APPDATA` together (Windows; both AppData folders must exist or tool4d quits without loading). Real 4D on Windows ignores these overrides. | E-series, W1, W6, debug run 43464410687 |
+
+The lock file matches 4D's top-level entries, which hold the pins, with three known differences: `loaded` is `null`
+(the emulator cannot know it), GitHub entries also carry `archiveSize` and `dependencies`, and the `dependencies`
+nested inside an entry are written as declared, while 4D sometimes expands them (resolved `path`, `loaded`, `found`, and
+`htmlURL`/`path` on GitHub children; Y1–Y4). 4D rewrites the lock on every launch; the nested part is informational.
 
 GitLab dependencies are reported as incomplete. Local-path dependencies are reported with `source: local` and the
 resolved `path`, and their GitHub dependencies are installed, but the local components themselves are left to the

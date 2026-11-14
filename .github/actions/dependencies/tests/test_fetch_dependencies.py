@@ -449,6 +449,30 @@ class Manager(Base):
                 __import__("shutil").rmtree(where / "env")
                 __import__("shutil").rmtree(decoy.parent)
 
+    def test_dependency_cycles_load_every_component_once(self):
+        # Y1-Y4: 4D resolves cycles (X -> Y -> X, X -> X, X -> Y -> Z -> X) without error, loads each component
+        # once, and still resolves a GitHub child declared inside the cycle (Y3).
+        cycles = {
+            "Y1": {"X": {"Y": {}}, "Y": {"X": {}}},
+            "Y2": {"X": {"X": {}}},
+            "Y3": {"X": {"Y": {}}, "Y": {"X": {}, "b": {"github": "o/b", "tag": "21.0"}}},
+            "Y4": {"X": {"Y": {}}, "Y": {"Z": {}}, "Z": {"X": {}}},
+        }
+        for case, graph in cycles.items():
+            with self.subTest(case=case):
+                shutil.rmtree(self.tmp / "libs", ignore_errors=True)
+                (self.pkg / "userPreferences.u/dependencies-lock.json").unlink(missing_ok=True)
+                for name, deps in graph.items():
+                    self.local_component(self.tmp / f"libs/{name}.4dbase", {
+                        child: spec or {"path": f"libs/{child}.4dbase"} for child, spec in deps.items()}, name)
+                self.declare({"X": {"path": "libs/X.4dbase"}})
+                report = self.run_manager(FakeGitHub(self.repos()))
+                self.assertEqual((report["incomplete"], report["warnings"]), ([], []))
+                self.assertEqual(report["resolved"], {"b": "21.0"} if case == "Y3" else {})
+                lock = self.lock()["dependencies"]
+                self.assertEqual(sorted(lock), sorted(graph) + (["b"] if case == "Y3" else []))
+                self.assertTrue(all(lock[name]["found"] for name in graph))
+
     def test_missing_local_component_is_not_found_but_left_to_the_caller(self):
         # R5: 4D writes path "" and found false. Local components stay the caller's responsibility.
         self.declare({"L": {"path": "missing/L.4dbase"}})
