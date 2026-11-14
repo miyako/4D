@@ -90,6 +90,19 @@ def anchor_pick(tags, anchor: str):
     return max(pool)[1] if pool else None
 
 
+def anchor_allows(tag: str, anchor: str) -> bool:
+    """Whether `tag` is one that a 4D:<anchor> declaration can resolve to (see anchor_pick): the anchor's own
+    major (and R releases up to it) or any older major (A2: "4d" on 21.2 is compatible with tag 20.0)."""
+    m = re.match(r"^(\d+)(?:R(\d+))?$", anchor or "")
+    key = tag_key(tag)
+    if not m or not key:
+        return False
+    major, r = int(m.group(1)), m.group(2)
+    if key[0] < major:
+        return True
+    return key[0] == major and (key[1] == 0 if r is None else key[1] <= int(r))
+
+
 _PARTIAL = re.compile(r"^v?(\d+|[xX*])(?:\.(\d+|[xX*]))?(?:\.(\d+|[xX*]))?$")
 
 
@@ -550,7 +563,9 @@ class Manager:
         self.results = {}
         self.incomplete = []
         self.warnings = []
-        self.combined = {}  # name -> conflicting secondary declarations, resolved together
+        self.combined = {}  # name -> differing secondary declarations, in the order 4D meets them
+        self.declarers = {}  # name -> components that declare it (secondary declarations only)
+        self.conflicts = {}  # name -> version conflict message
 
     def declarations(self):
         declared = {}
@@ -592,6 +607,7 @@ class Manager:
         # with the earlier ones, which can change the tag and so the children: resolve again from the start.
         for _ in range(64):
             self.results, self.incomplete, self.warnings = {}, [], list(base_warnings)
+            self.declarers, self.conflicts = {}, {}
             if not self.resolve_all(declared, pins):
                 break
         else:
@@ -605,10 +621,12 @@ class Manager:
     def resolve_all(self, declared, pins) -> bool:
         """Breadth-first resolution; returns True when a new secondary conflict requires another pass."""
         host = self.package.parent
-        queue = [(name, spec, True, self.path_bases.get(name, host), None) for name, spec in declared.items()]
+        queue = [(name, spec, True, self.path_bases.get(name, host), None, None) for name, spec in declared.items()]
         specs = {}
         while queue:
-            name, spec, primary, base, declared_by = queue.pop(0)
+            name, spec, primary, base, declared_by, parent = queue.pop(0)
+            if parent is not None and parent not in self.declarers.setdefault(name, []):
+                self.declarers[name].append(parent)
             if name in self.results:
                 previous = self.results[name]
                 if not isinstance(spec, dict) or primary or previous["primary"] or name in self.combined:
@@ -622,12 +640,8 @@ class Manager:
                     self.warnings.append(f"{name}: secondary declaration {json.dumps(spec)} differs from "
                                          f"{json.dumps(specs[name])}; the first is kept (not observed in 4D)")
                     continue
-                if self._floating(specs[name], spec) and self._compatible(previous, spec):
-                    self.warnings.append(f"{name}: secondary declaration {json.dumps(spec)} is satisfied by "
-                                         f"{previous.get('github')}@{previous.get('tag')}; how 4D combines latest "
-                                         "or 4d anchors with other declarations has not been observed")
-                    continue
-                # 4D resolves differing secondary declarations together and records the chosen tag (C6a/C6b).
+                # Differing secondary declarations are settled together (combined_release); the result can
+                # change the tag and so the children: resolve again from the start.
                 self.combined[name] = [specs[name], spec]
                 return True
             if not primary and name in self.combined:
@@ -641,59 +655,110 @@ class Manager:
             local = entry.get("source") == "local"
             origin = None if local else f"{entry.get('github')}@{entry.get('tag')}"
             for child, child_spec in (entry.get("dependencies") or {}).items():
-                queue.append((child, child_spec, False, host if local else None, origin))
+                queue.append((child, child_spec, False, host if local else None, origin, name))
+        # C6c, T3, T4, V1, V2, A1: 4D loads a dependency whose declarations conflict, as first declared, but
+        # none of the components that declare it (errCode 21).
+        for name in self.conflicts:
+            for parent in self.declarers.get(name, []):
+                self.disable(self.results[parent], name)
         return False
 
-    def _floating(self, *specs) -> bool:
-        try:
-            return any(classify(spec, self.anchor)[0] in ("latest", "anchor") for spec in specs)
-        except Failure:
-            return False
+    def pick(self, name, repo, spec, pins):
+        """Resolve one GitHub declaration on its own. Returns (tag, release, lockVersion, pinned)."""
+        kind, value, lock_version = classify(spec, self.anchor)
+        pin = pins.get(name)
+        if (kind != "tag" and pin and pin["github"] == repo and (pin.get("version") or None) == lock_version
+                and (kind != "range" or satisfies(pin["tag"], value))):
+            return pin["tag"], None, lock_version, True
+        if kind == "tag":
+            return value, None, lock_version, False
+        release = self.client.release(repo, kind, value)
+        return release["tag_name"], release, lock_version, False
+
+    @staticmethod
+    def allows(kind, value, tag) -> bool:
+        if kind == "latest":
+            return True
+        if kind == "tag":
+            return tag == value
+        if kind == "anchor":
+            return anchor_allows(tag, value)
+        return satisfies(tag, value)
 
     def combined_release(self, name, repo, specs, pins):
-        """Resolve conflicting secondary declarations together, as 4D does (M9 C6a-C6c): the highest release
-        that satisfies every range, or the single exact tag if it satisfies them; otherwise a conflict.
-        Returns (tag, release, lockVersion); 4D records the chosen tag as the lock `version`."""
+        """Settle differing secondary declarations of one dependency in the order 4D meets them, as observed
+        in 4D 21.2 (C6a-C6c and the combination cases L1-L5, F1-F7, T1-T4, V1, V2, E1, A1, A2):
+
+        - A declaration conflicts with an earlier one when their constraints cannot meet: a `tag` that the
+          other does not allow, or ranges/"4d" anchors that no release satisfies together. `latest` never
+          conflicts. The dependency is still installed and loaded, but the components that declare it are not.
+        - When any declaration uses the `tag` key, the first declaration is kept as written (T1, T2, L2, L3, F2,
+          F4). An exact `version` is not a `tag` (E1).
+        - Otherwise the release is the highest one that satisfies every declaration, `latest` meaning the
+          newest release, and the lock records it as `version` (C6a, L1, F1, F3, F5, E1). When none does, the
+          first declaration is kept as written (L4, L5).
+
+        Returns (tag, release, lockVersion, conflict message or None)."""
         described = ", ".join(json.dumps(spec) for spec in specs)
         if any(str(spec.get("github", "")).strip("/") != repo for spec in specs):
             raise Failure(f"secondary declarations of {name} name different repositories: {described}")
+        if len(specs) > 2:
+            self.warnings.append(f"{name}: {len(specs)} differing secondary declarations ({described}) are "
+                                 "settled pairwise; 4D has only been observed with two")
         kinds = [classify(spec, self.anchor) for spec in specs]
-        if any(kind in ("latest", "anchor") for kind, _, _ in kinds):
-            raise Failure(f"secondary declarations of {name} conflict ({described}); combining latest or "
-                          "4d anchors with other constraints has not been observed in 4D")
-        tags = {value for kind, value, _ in kinds if kind == "tag"}
-        ranges = [value for kind, value, _ in kinds if kind == "range"]
-        if len(tags) > 1:
-            raise Failure(f"secondary dependency {name} is disabled by conflicting tags "
-                          f"{', '.join(sorted(tags))}; 4D does not load the components that need it")
-        if tags:
-            tag = tags.pop()
-            if not all(satisfies(tag, value) for value in ranges):
-                raise Failure(f"secondary dependency {name} is disabled by a version conflict: {described}")
-            return tag, None, tag
         pin = pins.get(name)
-        if pin and pin["github"] == repo and all(satisfies(pin["tag"], value) for value in ranges):
-            return pin["tag"], None, pin["tag"]
-        releases = self.client.releases(repo)
-        matching = [r for r in releases if all(satisfies(r["tag_name"], value) for value in ranges)]
-        if not matching:
-            raise Failure(f"secondary dependency {name} is disabled by a version conflict: no release of "
-                          f"{repo} satisfies {described}")
-        release = max(matching, key=lambda r: _semver(r["tag_name"]))
-        return release["tag_name"], release, release["tag_name"]
+        pin_tag = pin["tag"] if pin and pin["github"] == repo else None
+        releases = None
 
-    def _compatible(self, previous, spec):
-        if spec.get("github") and spec.get("github") != previous.get("github"):
-            return False
-        if not previous.get("tag"):
-            return True
-        try:
-            kind, value, _ = classify(spec, self.anchor)
-        except Failure:
-            return False
-        if kind == "tag":
-            return value == previous["tag"]
-        return satisfies(previous["tag"], value) if kind == "range" else True
+        def tags():
+            nonlocal releases
+            if releases is None:
+                releases = self.client.releases(repo)
+            return [r["tag_name"] for r in releases]
+
+        def meet(a, b):
+            if "latest" in (a[0], b[0]):
+                return True
+            if a[0] == "tag":
+                return self.allows(*b[:2], a[1])
+            if b[0] == "tag":
+                return self.allows(*a[:2], b[1])
+            if pin_tag and self.allows(*a[:2], pin_tag) and self.allows(*b[:2], pin_tag):
+                return True
+            return any(self.allows(*a[:2], t) and self.allows(*b[:2], t) for t in tags())
+
+        conflict = None
+        for i, later in enumerate(kinds[1:], 1):
+            for j in range(i):
+                if not meet(kinds[j], later):
+                    conflict = conflict or (f"secondary dependency {name} is disabled by a version conflict: "
+                                            f"{json.dumps(specs[j])} and {json.dumps(specs[i])} are incompatible")
+        # Only the `tag` key keeps the first declaration; an exact `version` is resolved jointly (E1).
+        if not any(spec.get("tag") for spec in specs):
+            ranges = [(kind, value) for kind, value, _ in kinds if kind != "latest"]
+            if pin_tag and not any(kind == "latest" for kind, _, _ in kinds) and pin.get("version") == pin_tag \
+                    and all(self.allows(kind, value, pin_tag) for kind, value in ranges):
+                return pin_tag, None, pin_tag, conflict
+            pool = [t for t in tags() if all(self.allows(kind, value, t) for kind, value in ranges)]
+            if any(kind == "latest" for kind, _, _ in kinds):
+                newest = self.client.release(repo, "latest")["tag_name"]
+                pool = [t for t in pool if t == newest]
+            anchors = [value for kind, value, _ in kinds if kind == "anchor"]
+            if pool:
+                tag = anchor_pick(pool, anchors[0]) if anchors else max(pool, key=lambda t: _semver(t) or ())
+                release = next(r for r in releases if r["tag_name"] == tag)
+                return tag, release, tag, conflict
+        tag, release, lock_version, _ = self.pick(name, repo, specs[0], pins)
+        return tag, release, lock_version, conflict
+
+    def disable(self, entry, dependency):
+        if entry.get("disabled"):
+            return
+        reason = f"not loaded by 4D: its dependency {dependency} is disabled by a version conflict"
+        entry["disabled"] = True
+        entry.setdefault("errors", []).append({"errCode": 21, "message": reason})
+        if not entry.get("error"):
+            self.fail(entry, reason)
 
     def fail(self, entry, reason):
         entry["error"] = reason
@@ -749,23 +814,16 @@ class Manager:
         entry["github"] = repo
         try:
             if combined:
-                tag, release, entry["version"] = self.combined_release(name, repo, combined, pins)
-                entry["tag"] = tag
-                self.materialise(entry, repo, tag, release)
-                return self.finish(entry, name)
-            kind, value, lock_version = classify(spec, self.anchor)
+                tag, release, lock_version, conflict = self.combined_release(name, repo, combined, pins)
+                if conflict:
+                    self.conflicts[name] = conflict
+                    entry.setdefault("errors", []).append({"message": conflict})
+            else:
+                tag, release, lock_version, pinned = self.pick(name, repo, spec, pins)
+                if pinned:
+                    entry["pinned"] = True
             if lock_version:
                 entry["version"] = lock_version
-            pin = pins.get(name)
-            release = None
-            if (kind != "tag" and pin and pin["github"] == repo and (pin.get("version") or None) == lock_version
-                    and (kind != "range" or satisfies(pin["tag"], value))):
-                tag, entry["pinned"] = pin["tag"], True
-            elif kind == "tag":
-                tag = value
-            else:
-                release = self.client.release(repo, kind, value)
-                tag = release["tag_name"]
             entry["tag"] = tag
             self.materialise(entry, repo, tag, release)
         except Failure as error:
@@ -776,8 +834,8 @@ class Manager:
         override = component_override(self.package, name)
         if override:
             entry["overloadedBy"] = override
-            entry["errors"] = [{"errCode": 19, "message":
-                                f"A component with the same name ({name}) is already loaded from {override}"}]
+            entry.setdefault("errors", []).append({"errCode": 19, "message":
+                                f"A component with the same name ({name}) is already loaded from {override}"})
         return entry
 
     def materialise(self, entry, repo, tag, release):
@@ -910,8 +968,8 @@ class Manager:
                 item.update(htmlURL="", archiveURL="")
             item["path"] = native_path(Path(entry["path"])) if entry.get("path") else ""
             item["dependencies"] = entry.get("dependencies")
-            item["found"] = bool(entry.get("path")) and not entry.get("error")
-            item["loaded"] = None
+            item["found"] = bool(entry.get("path")) and (not entry.get("error") or bool(entry.get("disabled")))
+            item["loaded"] = False if entry.get("disabled") else None
             if entry.get("errors"):
                 item["errors"] = entry["errors"]
             elif entry.get("error"):
@@ -936,8 +994,10 @@ class Manager:
                     item["dependencies"][child] = {**spec, "dependencies": resolved["dependencies"]}
                 else:
                     item["dependencies"][child] = self.local_lock_item(resolved, nested=True)
-        item["loaded"] = None
-        item["found"] = bool(entry.get("path")) and not entry.get("error")
+        item["loaded"] = False if entry.get("disabled") else None
+        item["found"] = bool(entry.get("path")) and (not entry.get("error") or bool(entry.get("disabled")))
+        if entry.get("errors") and not nested:
+            item["errors"] = entry["errors"]
         return item
 
     def rewrite(self, package: Path, environment, env_entries):

@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -540,24 +541,72 @@ class Manager(Base):
         report = self.run_manager(client, "--offline")
         self.assertEqual((report["resolved"]["h"], report["incomplete"]), ("20.0.1", []))
 
-    def test_conflicting_secondary_tags_are_incomplete(self):
-        # C6c: 4D reports a version conflict and loads neither component that needs the dependency.
-        self.declare_two_parents()
-        report = self.run_manager(self.conflict_client({"tag": "20.0.1"}, {"tag": "20.0.3"}))
-        self.assertEqual([i["name"] for i in report["incomplete"]], ["h"])
-        self.assertIn("conflicting tags", report["incomplete"][0]["reason"])
+    # Real 4D 21.2 cases, mapped onto o/h (20.0.1, 20.0.3; runtime 20.2, so "4d" is 4D:20 and latest is
+    # 20.0.3): (first, second, tag, lock version, conflict). C6c, T3, T4, V1, V2 and A1 conflict: the dependency
+    # is still loaded as first declared, but the components that declare it are not.
+    COMBINATIONS = {
+        "C6c": ({"tag": "20.0.1"}, {"tag": "20.0.3"}, "20.0.1", None, True),
+        "L1": ({"version": "latest"}, {"version": "^20.0.0"}, "20.0.3", "20.0.3", False),
+        "L2": ({"version": "latest"}, {"tag": "20.0.1"}, "20.0.3", "latest", False),
+        "L3": ({"tag": "20.0.1"}, {"version": "latest"}, "20.0.1", None, False),
+        "L4": ({"version": "latest"}, {"version": "<20.0.3"}, "20.0.3", "latest", False),
+        "L5": ({"version": "<20.0.3"}, {}, "20.0.1", "<20.0.3", False),
+        "F1": ({"version": "4d"}, {"version": "^20.0.0"}, "20.0.3", "20.0.3", False),
+        "F2": ({"version": "4d"}, {"tag": "20.0.1"}, "20.0.3", "4D:20", False),
+        "F3": ({"version": "4d"}, {"version": "latest"}, "20.0.3", "20.0.3", False),
+        "F4": ({"tag": "20.0.1"}, {"version": "4d"}, "20.0.1", None, False),
+        "F5": ({"version": "4d"}, {"version": "<20.0.3"}, "20.0.1", "20.0.1", False),
+        "F6": ({"version": "<20.0.3"}, {"version": "4d"}, "20.0.1", "20.0.1", False),
+        "T1": ({"tag": "20.0.1"}, {"version": "^20.0.0"}, "20.0.1", None, False),
+        "T2": ({"version": "^20.0.0"}, {"tag": "20.0.1"}, "20.0.3", "^20.0.0", False),
+        "T3": ({"tag": "20.0.1"}, {"version": ">=20.0.3"}, "20.0.1", None, True),
+        "T4": ({"version": ">=20.0.3"}, {"tag": "20.0.1"}, "20.0.3", ">=20.0.3", True),
+        "V1": ({"version": ">=20.0.3"}, {"version": "<20.0.3"}, "20.0.3", ">=20.0.3", True),
+        "V2": ({"version": "<20.0.3"}, {"version": ">=20.0.3"}, "20.0.1", "<20.0.3", True),
+        "E1": ({"version": "^20.0.0"}, {"version": "20.0.1"}, "20.0.1", "20.0.1", False),
+        "A1": ({"version": "4d"}, {"version": ">=21.0.0"}, "20.0.3", "4D:20", True),
+        "A2": ({"version": "4d"}, {"tag": "19.0"}, "20.0.3", "4D:20", False),
+    }
 
-    def test_disjoint_secondary_ranges_are_incomplete(self):
-        self.declare_two_parents()
-        report = self.run_manager(self.conflict_client({"version": ">20.0.1"}, {"version": "<20.0.3"}))
-        self.assertEqual([i["name"] for i in report["incomplete"]], ["h"])
-        self.assertIn("version conflict", report["incomplete"][0]["reason"])
+    def test_differing_secondary_declarations_follow_4d(self):
+        for case, (first, second, tag, version, conflict) in self.COMBINATIONS.items():
+            with self.subTest(case=case):
+                for state in (self.pkg / "userPreferences.u", self.tmp / "home", self.tmp / "store"):
+                    shutil.rmtree(state, ignore_errors=True)  # child manifests are stored with each archive
+                self.declare_two_parents()
+                report = self.run_manager(self.conflict_client(first, second), "--runtime-version", "20.2")
+                h = report["dependencies"]["h"]
+                self.assertEqual((h["tag"], h.get("version")), (tag, version))
+                self.assertNotIn("error", h)
+                self.assertEqual([i["name"] for i in report["incomplete"]], ["x", "y"] if conflict else [])
+                self.assertEqual(report["warnings"], [])
+                lock = json.loads((self.pkg / "userPreferences.u/dependencies-lock.json").read_text())
+                self.assertEqual((lock["dependencies"]["h"]["tag"], lock["dependencies"]["h"].get("version")),
+                                 (tag, version))
+                self.assertTrue(lock["dependencies"]["h"]["found"])
+                self.assertEqual("errors" in lock["dependencies"]["h"], conflict)
 
-    def test_secondary_conflict_with_latest_is_explicitly_unverified(self):
-        self.declare_two_parents()
-        report = self.run_manager(self.conflict_client({}, {"version": "<20.0.3"}))
-        self.assertEqual([i["name"] for i in report["incomplete"]], ["h"])
-        self.assertIn("not been observed", report["incomplete"][0]["reason"])
+    def test_version_conflict_disables_the_declaring_components_as_4d_writes_it(self):
+        # C6c/T3: the dependency is found and loaded with the conflict in `errors`; each local component that
+        # declares it is found but not loaded, with errCode 21.
+        for comp in ("X", "Y"):
+            folder = self.tmp / f"libs/Comp{comp}.4dbase"
+            (folder / "Project/Sources").mkdir(parents=True)
+            (folder / f"Project/Comp{comp}.4DProject").write_text("{}")
+            tag = "20.0.1" if comp == "X" else "20.0.3"
+            (folder / "Project/Sources/dependencies.json").write_text(
+                json.dumps({"dependencies": {"h": {"github": "o/h", "tag": tag}}}))
+        self.declare({"CompX": {"path": "libs/CompX.4dbase"}, "CompY": {"path": "libs/CompY.4dbase"}})
+        report = self.run_manager(self.conflict_client({}, {}))
+        self.assertEqual(report["resolved"], {"h": "20.0.1"})
+        self.assertEqual([i["name"] for i in report["incomplete"]], ["CompX", "CompY"])
+        self.assertIn("disabled by a version conflict", report["incomplete"][0]["reason"])
+        lock = json.loads((self.pkg / "userPreferences.u/dependencies-lock.json").read_text())["dependencies"]
+        self.assertTrue(lock["h"]["found"])
+        self.assertIn("are incompatible", lock["h"]["errors"][0]["message"])
+        for comp in ("CompX", "CompY"):
+            self.assertEqual((lock[comp]["loaded"], lock[comp]["found"], lock[comp]["errors"][0]["errCode"]),
+                             (False, True, 21))
 
     def test_identical_secondary_declarations_are_not_combined(self):
         self.declare_two_parents()
@@ -566,12 +615,6 @@ class Manager(Base):
         self.assertNotIn("declarations", report["dependencies"]["h"])
         lock = json.loads((self.pkg / "userPreferences.u/dependencies-lock.json").read_text())
         self.assertEqual(lock["dependencies"]["h"]["version"], "^20.0.0")
-
-    def test_compatible_latest_secondary_keeps_first_resolution_with_warning(self):
-        self.declare_two_parents()
-        report = self.run_manager(self.conflict_client({"version": "<20.0.3"}, {}))
-        self.assertEqual((report["resolved"]["h"], report["incomplete"]), ("20.0.1", []))
-        self.assertIn("not been observed", report["warnings"][0])
 
     def test_secondary_conflict_restarts_with_the_combined_tags_children(self):
         # Re-resolving a combined dependency can change its children: they come from the final tag only.
