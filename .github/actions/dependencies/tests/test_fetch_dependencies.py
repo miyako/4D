@@ -603,10 +603,47 @@ class Manager(Base):
         self.assertIn("disabled by a version conflict", report["incomplete"][0]["reason"])
         lock = json.loads((self.pkg / "userPreferences.u/dependencies-lock.json").read_text())["dependencies"]
         self.assertTrue(lock["h"]["found"])
-        self.assertIn("are incompatible", lock["h"]["errors"][0]["message"])
+        self.assertIn("incompatible", lock["h"]["errors"][0]["message"])
         for comp in ("CompX", "CompY"):
             self.assertEqual((lock[comp]["loaded"], lock[comp]["found"], lock[comp]["errors"][0]["errCode"]),
                              (False, True, 21))
+
+    # Real 4D 21.2 cases G1-G3 and M1-M5, mapped onto o/h as above: local components CompX, CompY (and CompZ)
+    # declare h in this order. R overlaps ^20.0.0 in theory, but no release is in it. 4D settles them one at a
+    # time against the current state: (declarations, tag, lock version, conflict).
+    R = ">=20.0.4 <20.1.0"
+    SEQUENCES = {
+        "G1": ([{"version": "^20.0.0"}, {"version": R}], "20.0.3", "^20.0.0", True),
+        "G2": ([{"version": "4d"}, {"version": R}], "20.0.3", "4D:20", True),
+        "G3": ([{"tag": "20.0.1"}, {"version": R}], "20.0.1", None, True),
+        "M1": ([{"version": "^20.0.0"}, {"version": "<20.0.3"}, {"version": "latest"}], "20.0.1", "20.0.1", False),
+        "M2": ([{"tag": "20.0.1"}, {"version": "^20.0.0"}, {"version": ">=20.0.3"}], "20.0.1", None, True),
+        "M3": ([{"version": "latest"}, {"version": "^20.0.0"}, {"version": "<20.0.3"}], "20.0.3", None, True),
+        "M4": ([{"version": "^20.0.0"}, {"version": ">=20.0.3"}, {"version": "<20.0.3"}], "20.0.3", None, True),
+        "M5": ([{"version": "^20.0.0"}, {"tag": "20.0.1"}, {"version": ">=20.0.3"}], "20.0.3", "20.0.3", False),
+    }
+
+    def test_secondary_declarations_are_settled_one_at_a_time(self):
+        for case, (specs, tag, version, conflict) in self.SEQUENCES.items():
+            with self.subTest(case=case):
+                for state in (self.pkg / "userPreferences.u", self.tmp / "home", self.tmp / "store", self.tmp / "libs"):
+                    shutil.rmtree(state, ignore_errors=True)
+                comps = [f"Comp{c}" for c in "XYZ"[:len(specs)]]
+                for comp, spec in zip(comps, specs):
+                    folder = self.tmp / f"libs/{comp}.4dbase"
+                    (folder / "Project/Sources").mkdir(parents=True)
+                    (folder / f"Project/{comp}.4DProject").write_text("{}")
+                    (folder / "Project/Sources/dependencies.json").write_text(
+                        json.dumps({"dependencies": {"h": {**spec, "github": "o/h"}}}))
+                self.declare({comp: {"path": f"libs/{comp}.4dbase"} for comp in comps})
+                report = self.run_manager(self.conflict_client({}, {}), "--runtime-version", "20.2")
+                h = report["dependencies"]["h"]
+                self.assertEqual((h["tag"], h.get("version")), (tag, version))
+                self.assertEqual(sorted(i["name"] for i in report["incomplete"]), comps if conflict else [])
+                self.assertEqual(report["warnings"], [])
+                lock = json.loads((self.pkg / "userPreferences.u/dependencies-lock.json").read_text())["dependencies"]
+                self.assertEqual((lock["h"]["tag"], lock["h"].get("version")), (tag, version))
+                self.assertEqual([lock[c]["loaded"] for c in comps], [False if conflict else None] * len(comps))
 
     def test_identical_secondary_declarations_are_not_combined(self):
         self.declare_two_parents()
