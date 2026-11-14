@@ -686,26 +686,23 @@ class Manager:
         return satisfies(tag, value)
 
     def combined_release(self, name, repo, specs, pins):
-        """Settle differing secondary declarations of one dependency in the order 4D meets them, as observed
-        in 4D 21.2 (C6a-C6c and the combination cases L1-L5, F1-F7, T1-T4, V1, V2, E1, A1, A2):
+        """Settle differing secondary declarations of one dependency as 4D 21.2 does: one at a time, in the
+        order 4D meets them, each against the current state (C6a-C6c, L1-L5, F1-F7, T1-T4, V1, V2, E1, A1, A2,
+        G1-G3, M1-M5). The state starts as the first declaration.
 
-        - A declaration conflicts with an earlier one when their constraints cannot meet: a `tag` that the
-          other does not allow, or ranges/"4d" anchors that no release satisfies together. `latest` never
-          conflicts. The dependency is still installed and loaded, but the components that declare it are not.
-        - When any declaration uses the `tag` key, the first declaration is kept as written (T1, T2, L2, L3, F2,
-          F4). An exact `version` is not a `tag` (E1).
-        - Otherwise the release is the highest one that satisfies every declaration, `latest` meaning the
-          newest release, and the lock records it as `version` (C6a, L1, F1, F3, F5, E1). When none does, the
-          first declaration is kept as written (L4, L5).
+        - A declaration conflicts with the state when they cannot meet: a `tag` the other does not allow, or
+          ranges/"4d" anchors that no release satisfies together (G1). `latest` never conflicts. The state is
+          kept; the dependency is still installed and loaded, but the components that declare it are not.
+        - When the state or the declaration uses the `tag` key, or the state is already a combined result, the
+          state is kept (T1, T2, M1, M5). An exact `version` is not a `tag` (E1).
+        - Otherwise the state becomes the highest release that satisfies both, `latest` meaning the newest
+          release, recorded as the lock `version` (C6a, L1, F1, F3, F5, E1, M5); with none, the state is kept
+          (L4, L5). A combined state is an exact tag: a later conflict with it drops the lock `version` (M3, M4).
 
         Returns (tag, release, lockVersion, conflict message or None)."""
         described = ", ".join(json.dumps(spec) for spec in specs)
         if any(str(spec.get("github", "")).strip("/") != repo for spec in specs):
             raise Failure(f"secondary declarations of {name} name different repositories: {described}")
-        if len(specs) > 2:
-            self.warnings.append(f"{name}: {len(specs)} differing secondary declarations ({described}) are "
-                                 "settled pairwise; 4D has only been observed with two")
-        kinds = [classify(spec, self.anchor) for spec in specs]
         pin = pins.get(name)
         pin_tag = pin["tag"] if pin and pin["github"] == repo else None
         releases = None
@@ -720,34 +717,44 @@ class Manager:
             if "latest" in (a[0], b[0]):
                 return True
             if a[0] == "tag":
-                return self.allows(*b[:2], a[1])
+                return self.allows(*b, a[1])
             if b[0] == "tag":
-                return self.allows(*a[:2], b[1])
-            if pin_tag and self.allows(*a[:2], pin_tag) and self.allows(*b[:2], pin_tag):
+                return self.allows(*a, b[1])
+            if pin_tag and self.allows(*a, pin_tag) and self.allows(*b, pin_tag):
                 return True
-            return any(self.allows(*a[:2], t) and self.allows(*b[:2], t) for t in tags())
+            return any(self.allows(*a, t) and self.allows(*b, t) for t in tags())
 
+        state = classify(specs[0], self.anchor)[:2]
+        keep = bool(specs[0].get("tag"))
+        result = None  # (tag, release) once two declarations have been combined
         conflict = None
-        for i, later in enumerate(kinds[1:], 1):
-            for j in range(i):
-                if not meet(kinds[j], later):
-                    conflict = conflict or (f"secondary dependency {name} is disabled by a version conflict: "
-                                            f"{json.dumps(specs[j])} and {json.dumps(specs[i])} are incompatible")
-        # Only the `tag` key keeps the first declaration; an exact `version` is resolved jointly (E1).
-        if not any(spec.get("tag") for spec in specs):
-            ranges = [(kind, value) for kind, value, _ in kinds if kind != "latest"]
-            if pin_tag and not any(kind == "latest" for kind, _, _ in kinds) and pin.get("version") == pin_tag \
-                    and all(self.allows(kind, value, pin_tag) for kind, value in ranges):
-                return pin_tag, None, pin_tag, conflict
-            pool = [t for t in tags() if all(self.allows(kind, value, t) for kind, value in ranges)]
-            if any(kind == "latest" for kind, _, _ in kinds):
-                newest = self.client.release(repo, "latest")["tag_name"]
-                pool = [t for t in pool if t == newest]
-            anchors = [value for kind, value, _ in kinds if kind == "anchor"]
-            if pool:
+        for spec in specs[1:]:
+            other = classify(spec, self.anchor)[:2]
+            if not meet(state, other):
+                conflict = conflict or (f"secondary dependency {name} is disabled by a version conflict: "
+                                        f"{json.dumps(spec)} is incompatible with "
+                                        f"{result[0] if result else json.dumps(specs[0])}")
+                continue
+            if keep or result or spec.get("tag"):
+                continue
+            constraints = [c for c in (state, other) if c[0] != "latest"]
+            latest = len(constraints) < 2
+            if pin_tag and not latest and pin.get("version") == pin_tag \
+                    and all(self.allows(*c, pin_tag) for c in constraints):
+                result = pin_tag, None
+            else:
+                pool = [t for t in tags() if all(self.allows(*c, t) for c in constraints)]
+                if latest:
+                    newest = self.client.release(repo, "latest")["tag_name"]
+                    pool = [t for t in pool if t == newest]
+                if not pool:
+                    continue
+                anchors = [value for kind, value in constraints if kind == "anchor"]
                 tag = anchor_pick(pool, anchors[0]) if anchors else max(pool, key=lambda t: _semver(t) or ())
-                release = next(r for r in releases if r["tag_name"] == tag)
-                return tag, release, tag, conflict
+                result = tag, next(r for r in releases if r["tag_name"] == tag)
+            state = ("tag", result[0])
+        if result:
+            return result[0], result[1], None if conflict else result[0], conflict
         tag, release, lock_version, _ = self.pick(name, repo, specs[0], pins)
         return tag, release, lock_version, conflict
 

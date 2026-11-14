@@ -36,7 +36,8 @@ recorded in [sonar-4d#4](https://github.com/miyako/sonar-4d/issues/4). Cases C4�
 and 4D 21R5 (build 100156) on macOS, headless with an isolated home folder; cases R1–R8 against 4D 21.2 in the same
 way. Both are recorded in [#5](https://github.com/miyako/4D/pull/5) and [#6](https://github.com/miyako/4D/issues/6). The
 combination cases L1–L5, F1–F7, T1–T4, V1, V2, E1, A1 and A2 (two local components declaring the same GitHub dependency
-differently) were run against 4D 21.2 in the same way and are recorded in [#8](https://github.com/miyako/4D/pull/8).
+differently) were run against 4D 21.2 in the same way and are recorded in [#8](https://github.com/miyako/4D/pull/8); G1–G3 and
+M1–M5 (no common release, three declarations) likewise, recorded in the pull request that added them.
 
 | Rule | Evidence |
 | --- | --- |
@@ -48,10 +49,10 @@ differently) were run against 4D 21.2 in the same way and are recorded in [#8](h
 | Ranges (`^`, `~`, `>=`, `x`, `-`, `\|\|`) pick the highest matching release. Prereleases and drafts are ignored. | D7 |
 | Child dependencies come from the component's `Project/Sources/dependencies.json` at the resolved tag, recursively. The lock file is flat. | D8, W7, W8 |
 | A direct declaration wins over a child declaration of the same name. | D14, W14 |
-| Differing child declarations of the same name that use `version` (ranges, exact versions, `latest`, `"4d"`) are resolved together: the highest release satisfying all of them, `latest` meaning the newest release, whatever the declaration order. The lock records the chosen tag as `version`. Children come from the final tag. When no release satisfies them all, the first declaration is kept as written. | C6a, C6b, L1, L4, L5, F1, F3, F5–F7, E1 |
-| When one of them uses the `tag` key, the first declaration is kept as written, even if the tag would satisfy the other. | T1, T2, L2, L3, F2, F4, A2 |
-| Declarations conflict when their constraints cannot meet: a tag that the other does not allow, or ranges with no common release (observed only with ranges that cannot overlap at all). `"4d"` allows its own major and older ones; `latest` conflicts with nothing. The dependency is still installed and loaded as first declared, with the conflict in the lock's `errors`, but the components that declare it are not loaded (errCode 21) and are reported incomplete. | C6c, T3, T4, V1, V2, A1 |
-| More than two differing declarations of one name have not been observed. They are settled pairwise in declaration order, with a warning. | – |
+| Differing child declarations of the same name are settled one at a time, in the order 4D meets them, each against the current state (initially the first declaration). | M1–M5 |
+| A declaration that uses `version` (a range, an exact version, `latest`, `"4d"`) is combined with a state that also comes from `version`: the state becomes the highest release satisfying both, `latest` meaning the newest release, whatever the declaration order. The lock records the chosen tag as `version`. Children come from the final tag. When no release satisfies both, the state is kept. | C6a, C6b, L1, L4, L5, F1, F3, F5–F7, E1, M5 |
+| When the state or the declaration uses the `tag` key, or the state is already a combined tag, the state is kept, even if the tag would satisfy the other. | T1, T2, L2, L3, F2, F4, A2, M1, M5 |
+| A declaration conflicts with the state when they cannot meet: a tag that the other does not allow, or ranges with no common release, even if they overlap in theory. `"4d"` allows its own major and older ones; `latest` conflicts with nothing. The dependency is still installed and loaded as the state, with the conflict in the lock's `errors` (and no `version` when the state was combined), but every component that declares it is not loaded (errCode 21) and is reported incomplete. | C6c, T3, T4, V1, V2, A1, G1–G3, M2–M4 |
 | A local (`path`) component's own `Project/Sources/dependencies.json` is read, and what it declares is resolved like the children of a GitHub component. | C6ctl |
 | A relative `path` in `dependencies.json` resolves from the folder that contains the project package, also when a local component declares it. A relative `path` in `environment4d.json` resolves from that file's folder. | R1–R3, R6–R8 |
 | The lock file lists local components with `path`, `found` and their `dependencies` (local ones by their resolved `path` and `found`). A missing one has `path: ""` and `found: false`. | C6ctl, R3, R5, R8 |
