@@ -36,7 +36,7 @@ recorded in [sonar-4d#4](https://github.com/miyako/sonar-4d/issues/4). Cases C4�
 and 4D 21R5 (build 100156) on macOS, headless with an isolated home folder; cases R1–R8 against 4D 21.2 in the same
 way. Both are recorded in [#5](https://github.com/miyako/4D/pull/5) and [#6](https://github.com/miyako/4D/issues/6). The
 combination cases L1–L5, F1–F7, T1–T4, V1, V2, E1, A1 and A2 (two local components declaring the same GitHub dependency
-differently) were run against 4D 21.2 in the same way.
+differently) were run against 4D 21.2 in the same way and are recorded in [#8](https://github.com/miyako/4D/pull/8).
 
 | Rule | Evidence |
 | --- | --- |
