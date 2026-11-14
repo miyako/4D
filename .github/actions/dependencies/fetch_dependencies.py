@@ -569,6 +569,9 @@ class Manager:
                 # environment4d.json may map a name straight to a path.
                 env_entries[name] = entry
                 declared[name] = {"path": entry} if isinstance(entry, str) else entry
+        # A relative path resolves from the folder that contains environment4d.json (R2, R7), or otherwise from
+        # the folder that contains the project package (R1, R6).
+        self.path_bases = {name: environment.parent for name in env_entries}
         return declared, environment, env_entries
 
     def lock_pins(self):
@@ -601,10 +604,11 @@ class Manager:
 
     def resolve_all(self, declared, pins) -> bool:
         """Breadth-first resolution; returns True when a new secondary conflict requires another pass."""
-        queue = [(name, spec, True) for name, spec in declared.items()]
+        host = self.package.parent
+        queue = [(name, spec, True, self.path_bases.get(name, host), None) for name, spec in declared.items()]
         specs = {}
         while queue:
-            name, spec, primary = queue.pop(0)
+            name, spec, primary, base, declared_by = queue.pop(0)
             if name in self.results:
                 previous = self.results[name]
                 if not isinstance(spec, dict) or primary or previous["primary"] or name in self.combined:
@@ -613,6 +617,10 @@ class Manager:
                         return True
                     continue
                 if spec == specs[name]:
+                    continue
+                if not spec.get("github") or not specs[name].get("github"):
+                    self.warnings.append(f"{name}: secondary declaration {json.dumps(spec)} differs from "
+                                         f"{json.dumps(specs[name])}; the first is kept (not observed in 4D)")
                     continue
                 if self._floating(specs[name], spec) and self._compatible(previous, spec):
                     self.warnings.append(f"{name}: secondary declaration {json.dumps(spec)} is satisfied by "
@@ -625,11 +633,15 @@ class Manager:
             if not primary and name in self.combined:
                 entry = self.resolve_one(name, None, False, pins, combined=self.combined[name])
             else:
-                entry = self.resolve_one(name, spec, primary, pins)
+                entry = self.resolve_one(name, spec, primary, pins, base=base, declared_by=declared_by)
                 specs[name] = spec
             self.results[name] = entry
+            # Paths declared by a local component also resolve from the host package's parent folder (R8).
+            # How 4D resolves a path declared by a GitHub component has not been observed.
+            local = entry.get("source") == "local"
+            origin = None if local else f"{entry.get('github')}@{entry.get('tag')}"
             for child, child_spec in (entry.get("dependencies") or {}).items():
-                queue.append((child, child_spec, False))
+                queue.append((child, child_spec, False, host if local else None, origin))
         return False
 
     def _floating(self, *specs) -> bool:
@@ -688,7 +700,38 @@ class Manager:
         self.incomplete.append({"name": entry["name"], "reason": reason})
         return entry
 
-    def resolve_one(self, name, spec, primary, pins, combined=None):
+    def resolve_local(self, entry, spec, base, declared_by):
+        """A local (`path`) component. 4D reads its dependencies.json and resolves what it declares (C6ctl);
+        installing the component itself is left to the caller."""
+        name, raw = entry["name"], spec.get("path", "")
+        entry.update(source="local", local=raw)
+        if declared_by:
+            self.warnings.append(f"{name}: local path declared by {declared_by} is not resolved; how 4D resolves "
+                                 "it has not been observed")
+            return entry
+        folder = Path(raw) if isinstance(raw, str) and raw else None
+        if folder is not None and not folder.is_absolute():
+            folder = base / folder
+        if folder is None or not folder.is_dir():
+            # R5: 4D writes path "" and found false.
+            self.warnings.append(f"{name}: local component not found at {raw!r}")
+            return entry
+        folder = Path(os.path.normpath(folder))
+        entry["path"] = str(folder)
+        manifest = folder / "Project" / "Sources" / "dependencies.json"
+        if not manifest.is_file():
+            return entry
+        try:
+            value = json.loads(manifest.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError) as error:
+            return self.fail(entry, f"cannot parse {manifest}: {error}")
+        try:
+            entry["dependencies"] = manifest_dependencies(value) or None
+        except ValueError as error:
+            return self.fail(entry, f"invalid {manifest}: {error}")
+        return entry
+
+    def resolve_one(self, name, spec, primary, pins, combined=None, base=None, declared_by=None):
         entry = {"name": name, "primary": primary}
         if combined:
             spec = combined[0]
@@ -699,8 +742,7 @@ class Manager:
             entry["gitlab"] = spec["gitlab"]
             return self.fail(entry, "GitLab dependencies are not supported by this emulator")
         if not spec.get("github"):
-            entry.update(source="local", local=spec.get("path", ""))
-            return entry
+            return self.resolve_local(entry, spec, base or self.package.parent, declared_by)
         repo = str(spec["github"]).strip("/")
         if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo):
             return self.fail(entry, f"invalid github repository {repo!r}")
@@ -853,6 +895,9 @@ class Manager:
     def write_lock(self):
         lock = {"version": self.version_code, "dependencies": {}} if self.version_code else {"dependencies": {}}
         for name, entry in sorted(self.results.items()):
+            if entry.get("source") == "local":
+                lock["dependencies"][name] = self.local_lock_item(entry)
+                continue
             if not entry.get("github"):
                 continue
             item = {"github": entry["github"]}
@@ -873,6 +918,27 @@ class Manager:
                 item["errors"] = [{"message": entry["error"]}]
             lock["dependencies"][name] = item
         write_json(self.lock_path, lock)
+
+    def local_lock_item(self, entry, nested=False):
+        """As 4D writes a local component (C6ctl, R3, R5, R8, R9). Its declarations are written as declared,
+        except that a local one that declares nothing itself, or was not found, is replaced by its resolved
+        `path`/`loaded`/`found` (R3, R8); one that declares dependencies keeps its declared `path` and gains
+        them (R9). `loaded` is unknown to the emulator, as for GitHub entries."""
+        item = {"path": native_path(Path(entry["path"])) if entry.get("path") else ""}
+        if not nested and entry.get("dependencies"):
+            item["dependencies"] = {}
+            for child, spec in entry["dependencies"].items():
+                resolved = self.results.get(child) or {}
+                is_local = isinstance(spec, dict) and not spec.get("github") and not spec.get("gitlab")
+                if not is_local or resolved.get("source") != "local":
+                    item["dependencies"][child] = spec
+                elif resolved.get("dependencies") and not resolved.get("error"):
+                    item["dependencies"][child] = {**spec, "dependencies": resolved["dependencies"]}
+                else:
+                    item["dependencies"][child] = self.local_lock_item(resolved, nested=True)
+        item["loaded"] = None
+        item["found"] = bool(entry.get("path")) and not entry.get("error")
+        return item
 
     def rewrite(self, package: Path, environment, env_entries):
         """tool4d loads exact `tag` entries only and never resolves children: write a flat
