@@ -42,6 +42,14 @@ class Failure(Exception):
     """A dependency-level failure, reported in `incomplete`."""
 
 
+class AuthFailure(Failure):
+    """GitHub rejected the request (401, or 403 other than rate limiting): never worked around."""
+
+
+class NotFound(Failure):
+    """The release or repository does not exist (or is invisible without a token)."""
+
+
 class UsageError(Exception):
     """Invalid invocation or policy violation (exit 2)."""
 
@@ -244,7 +252,7 @@ class GitHub:
                 elif error.code in (429, 500, 502, 503, 504):
                     delay = float(error.headers.get("Retry-After") or 0) or min(2 ** attempt + random.random(), 20)
                 elif error.code in (401, 403):
-                    raise Failure(f"HTTP {error.code} from GitHub: " + (
+                    raise AuthFailure(f"HTTP {error.code} from GitHub: " + (
                         "token rejected or not authorised for this resource (no anonymous retry, as 4D)"
                         if self.token else "access denied")) from None
                 elif error.code == 404:
@@ -272,7 +280,7 @@ class GitHub:
                 return self.json(f"/repos/{repo}/releases/tags/{urllib.parse.quote(value, safe='')}")
         except LookupError:
             what = "latest release" if kind == "latest" else f"release {value!r}"
-            raise Failure(f"{what} not found in {repo}{self._hint()}") from None
+            raise NotFound(f"{what} not found in {repo}{self._hint()}") from None
         releases = self.releases(repo)
         tags = [r["tag_name"] for r in releases]
         if kind == "anchor":
@@ -290,7 +298,7 @@ class GitHub:
             try:
                 batch = self.json(f"/repos/{repo}/releases?per_page=100&page={page}")
             except LookupError:
-                raise Failure(f"repository {repo} not found{self._hint()}") from None
+                raise NotFound(f"repository {repo} not found{self._hint()}") from None
             out += [r for r in batch if not r.get("draft") and not r.get("prerelease")]
             if len(batch) < 100:
                 break
@@ -303,8 +311,15 @@ class GitHub:
             data = self._request(API + path, "application/vnd.github.raw+json")
         except LookupError:
             return None
-        value = json.loads(data.decode("utf-8-sig"))
-        return value.get("dependencies") if isinstance(value, dict) else None
+        where = f"Project/Sources/dependencies.json of {repo}@{tag}"
+        try:
+            value = json.loads(data.decode("utf-8-sig"))
+        except ValueError as error:
+            raise Failure(f"cannot parse {where}: {error}") from None
+        try:
+            return manifest_dependencies(value) or None
+        except ValueError as error:
+            raise Failure(f"invalid {where}: {error}") from None
 
     def download(self, asset: dict) -> bytes:
         if self.token:
@@ -474,6 +489,23 @@ def locate_project(path: Path):
     raise UsageError(f"no 4D project at {path}")
 
 
+def manifest_dependencies(value) -> dict:
+    """The `dependencies` object of a dependencies.json/environment4d.json document."""
+    if not isinstance(value, dict):
+        raise ValueError("the top level must be a JSON object")
+    dependencies = value.get("dependencies", {})
+    if not isinstance(dependencies, dict):
+        raise ValueError('"dependencies" must be a JSON object')
+    return dependencies
+
+
+def load_manifest(path: Path) -> dict:
+    try:
+        return manifest_dependencies(load_json(path))
+    except ValueError as error:
+        raise UsageError(f"invalid {path}: {error}") from None
+
+
 def load_json(path: Path):
     try:
         return json.loads(path.read_text(encoding="utf-8-sig"))
@@ -518,18 +550,25 @@ class Manager:
         self.results = {}
         self.incomplete = []
         self.warnings = []
+        self.combined = {}  # name -> conflicting secondary declarations, resolved together
 
     def declarations(self):
         declared = {}
         sources = self.package / "Project" / "Sources" / "dependencies.json"
         if sources.is_file():
-            declared = dict((load_json(sources) or {}).get("dependencies") or {})
+            declared = dict(load_manifest(sources))
         environment = find_environment(self.package)
         env_entries = {}
         if environment:
-            env_entries = dict((load_json(environment) or {}).get("dependencies") or {})
-            for name, entry in env_entries.items():
-                declared[name] = entry if isinstance(entry, dict) else {"path": entry}
+            env_entries = {}
+            for name, entry in load_manifest(environment).items():
+                if name not in declared:
+                    # 4D 21.2 and 21R5 neither fetch nor load a name declared only here (M9 C4a-C4c).
+                    self.warnings.append(f"{name}: declared only in {environment}; 4D ignores it")
+                    continue
+                # environment4d.json may map a name straight to a path.
+                env_entries[name] = entry
+                declared[name] = {"path": entry} if isinstance(entry, str) else entry
         return declared, environment, env_entries
 
     def lock_pins(self):
@@ -545,25 +584,91 @@ class Manager:
     def run(self):
         declared, environment, env_entries = self.declarations()
         pins = self.lock_pins()
-        queue = [(name, spec, True) for name, spec in declared.items()]
-        while queue:
-            name, spec, primary = queue.pop(0)
-            spec = spec if isinstance(spec, dict) else {}
-            if name in self.results:
-                previous = self.results[name]
-                if not primary and not previous["primary"] and not self._compatible(previous, spec):
-                    self.warnings.append(f"{name}: secondary declaration {json.dumps(spec)} conflicts with "
-                                         f"{previous.get('github')}@{previous.get('tag')}; first resolution kept")
-                continue
-            entry = self.resolve_one(name, spec, primary, pins)
-            self.results[name] = entry
-            for child, child_spec in (entry.get("dependencies") or {}).items():
-                queue.append((child, child_spec, False))
+        base_warnings = list(self.warnings)
+        # A secondary declaration that the first resolution of its name does not satisfy is resolved together
+        # with the earlier ones, which can change the tag and so the children: resolve again from the start.
+        for _ in range(64):
+            self.results, self.incomplete, self.warnings = {}, [], list(base_warnings)
+            if not self.resolve_all(declared, pins):
+                break
+        else:
+            raise UsageError("secondary dependency conflicts did not settle")
         if not self.args.no_write_lock:
             self.write_lock()
         if self.args.rewrite:
             self.rewrite(Path(self.args.rewrite).resolve(), environment, env_entries)
         return self.report(environment)
+
+    def resolve_all(self, declared, pins) -> bool:
+        """Breadth-first resolution; returns True when a new secondary conflict requires another pass."""
+        queue = [(name, spec, True) for name, spec in declared.items()]
+        specs = {}
+        while queue:
+            name, spec, primary = queue.pop(0)
+            if name in self.results:
+                previous = self.results[name]
+                if not isinstance(spec, dict) or primary or previous["primary"] or name in self.combined:
+                    if name in self.combined and isinstance(spec, dict) and spec not in self.combined[name]:
+                        self.combined[name].append(spec)
+                        return True
+                    continue
+                if spec == specs[name]:
+                    continue
+                if self._floating(specs[name], spec) and self._compatible(previous, spec):
+                    self.warnings.append(f"{name}: secondary declaration {json.dumps(spec)} is satisfied by "
+                                         f"{previous.get('github')}@{previous.get('tag')}; how 4D combines latest "
+                                         "or 4d anchors with other declarations has not been observed")
+                    continue
+                # 4D resolves differing secondary declarations together and records the chosen tag (C6a/C6b).
+                self.combined[name] = [specs[name], spec]
+                return True
+            if not primary and name in self.combined:
+                entry = self.resolve_one(name, None, False, pins, combined=self.combined[name])
+            else:
+                entry = self.resolve_one(name, spec, primary, pins)
+                specs[name] = spec
+            self.results[name] = entry
+            for child, child_spec in (entry.get("dependencies") or {}).items():
+                queue.append((child, child_spec, False))
+        return False
+
+    def _floating(self, *specs) -> bool:
+        try:
+            return any(classify(spec, self.anchor)[0] in ("latest", "anchor") for spec in specs)
+        except Failure:
+            return False
+
+    def combined_release(self, name, repo, specs, pins):
+        """Resolve conflicting secondary declarations together, as 4D does (M9 C6a-C6c): the highest release
+        that satisfies every range, or the single exact tag if it satisfies them; otherwise a conflict.
+        Returns (tag, release, lockVersion); 4D records the chosen tag as the lock `version`."""
+        described = ", ".join(json.dumps(spec) for spec in specs)
+        if any(str(spec.get("github", "")).strip("/") != repo for spec in specs):
+            raise Failure(f"secondary declarations of {name} name different repositories: {described}")
+        kinds = [classify(spec, self.anchor) for spec in specs]
+        if any(kind in ("latest", "anchor") for kind, _, _ in kinds):
+            raise Failure(f"secondary declarations of {name} conflict ({described}); combining latest or "
+                          "4d anchors with other constraints has not been observed in 4D")
+        tags = {value for kind, value, _ in kinds if kind == "tag"}
+        ranges = [value for kind, value, _ in kinds if kind == "range"]
+        if len(tags) > 1:
+            raise Failure(f"secondary dependency {name} is disabled by conflicting tags "
+                          f"{', '.join(sorted(tags))}; 4D does not load the components that need it")
+        if tags:
+            tag = tags.pop()
+            if not all(satisfies(tag, value) for value in ranges):
+                raise Failure(f"secondary dependency {name} is disabled by a version conflict: {described}")
+            return tag, None, tag
+        pin = pins.get(name)
+        if pin and pin["github"] == repo and all(satisfies(pin["tag"], value) for value in ranges):
+            return pin["tag"], None, pin["tag"]
+        releases = self.client.releases(repo)
+        matching = [r for r in releases if all(satisfies(r["tag_name"], value) for value in ranges)]
+        if not matching:
+            raise Failure(f"secondary dependency {name} is disabled by a version conflict: no release of "
+                          f"{repo} satisfies {described}")
+        release = max(matching, key=lambda r: _semver(r["tag_name"]))
+        return release["tag_name"], release, release["tag_name"]
 
     def _compatible(self, previous, spec):
         if spec.get("github") and spec.get("github") != previous.get("github"):
@@ -583,8 +688,13 @@ class Manager:
         self.incomplete.append({"name": entry["name"], "reason": reason})
         return entry
 
-    def resolve_one(self, name, spec, primary, pins):
+    def resolve_one(self, name, spec, primary, pins, combined=None):
         entry = {"name": name, "primary": primary}
+        if combined:
+            spec = combined[0]
+            entry["declarations"] = combined
+        if not isinstance(spec, dict):
+            return self.fail(entry, f"invalid declaration {json.dumps(spec)}: expected a JSON object")
         if spec.get("gitlab"):
             entry["gitlab"] = spec["gitlab"]
             return self.fail(entry, "GitLab dependencies are not supported by this emulator")
@@ -596,6 +706,11 @@ class Manager:
             return self.fail(entry, f"invalid github repository {repo!r}")
         entry["github"] = repo
         try:
+            if combined:
+                tag, release, entry["version"] = self.combined_release(name, repo, combined, pins)
+                entry["tag"] = tag
+                self.materialise(entry, repo, tag, release)
+                return self.finish(entry, name)
             kind, value, lock_version = classify(spec, self.anchor)
             if lock_version:
                 entry["version"] = lock_version
@@ -613,6 +728,9 @@ class Manager:
             self.materialise(entry, repo, tag, release)
         except Failure as error:
             return self.fail(entry, str(error))
+        return self.finish(entry, name)
+
+    def finish(self, entry, name):
         override = component_override(self.package, name)
         if override:
             entry["overloadedBy"] = override
@@ -703,6 +821,8 @@ class Manager:
                 try:
                     release = release or self.client.release(repo, "tag", tag)
                     current = self.asset(release, repo)
+                except AuthFailure:
+                    raise  # a rejected token is not an outage: no fallback, as 4D does not retry
                 except Failure as error:
                     lookup_error = error
             if stored and stored.get("asset"):
@@ -711,6 +831,9 @@ class Manager:
                 if archive.is_file():
                     actual = sha256_file(archive)
                     if actual == stored.get("sha256") and (not expected or expected == f"sha256:{actual}"):
+                        if lookup_error:
+                            self.warnings.append(f"{repo}@{tag}: release lookup failed ({lookup_error}); "
+                                                 "using the archive verified against its recorded digest")
                         return archive, stored, "archive"
                     self.warnings.append(f"{repo}@{tag}: stored archive failed verification; discarded")
             if current is None:
