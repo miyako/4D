@@ -23,7 +23,7 @@ Windows. The case files and comparisons are recorded in miyako/4D pull requests
 [#5](https://github.com/miyako/4D/pull/5), [#7](https://github.com/miyako/4D/pull/7),
 [#8](https://github.com/miyako/4D/pull/8), [#9](https://github.com/miyako/4D/pull/9) and
 [#10](https://github.com/miyako/4D/pull/10), in issue [#6](https://github.com/miyako/4D/issues/6), and, for Windows,
-in [miyako/sonar-4d#4](https://github.com/miyako/sonar-4d/issues/4).
+in [miyako/4d-static-analysis#4](https://github.com/miyako/4d-static-analysis/issues/4).
 
 ## Rules and their evidence
 

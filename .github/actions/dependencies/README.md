@@ -32,7 +32,7 @@ By default the step fails when a dependency cannot be resolved or installed (`fa
 
 Each rule below follows what real 4D does. The evidence IDs refer to experiments run against 4D 21R5, 4D 21.2, 4D Server
 21.2 and tool4d 21.0 on macOS, and 4D 21.0 (build 100434) and tool4d on Windows. The Windows real-4D cases W1–W15 are
-recorded in [sonar-4d#4](https://github.com/miyako/sonar-4d/issues/4). Cases C4–C6 were run against 4D 21.2 (build 100653)
+recorded in [4d-static-analysis#4](https://github.com/miyako/4d-static-analysis/issues/4). Cases C4–C6 were run against 4D 21.2 (build 100653)
 and 4D 21R5 (build 100156) on macOS, headless with an isolated home folder; cases R1–R8 against 4D 21.2 in the same
 way. Both are recorded in [#5](https://github.com/miyako/4D/pull/5) and [#6](https://github.com/miyako/4D/issues/6). The
 combination cases L1–L5, F1–F7, T1–T4, V1, V2, E1, A1 and A2 (two local components declaring the same GitHub dependency
