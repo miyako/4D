@@ -33,7 +33,8 @@ By default the step fails when a dependency cannot be resolved or installed (`fa
 Each rule below follows what real 4D does. The evidence IDs refer to experiments run against 4D 21R5, 4D 21.2, 4D Server
 21.2 and tool4d 21.0 on macOS, and 4D 21.0 (build 100434) and tool4d on Windows. The Windows real-4D cases W1–W15 are
 recorded in [sonar-4d#4](https://github.com/miyako/sonar-4d/issues/4). Cases C4–C6 were run against 4D 21.2 (build 100653)
-and 4D 21R5 (build 100156) on macOS, headless with an isolated home folder.
+and 4D 21R5 (build 100156) on macOS, headless with an isolated home folder; cases R1–R8 against 4D 21.2 in the same
+way. Both are recorded in [#5](https://github.com/miyako/4D/pull/5) and [#6](https://github.com/miyako/4D/issues/6).
 
 | Rule | Evidence |
 | --- | --- |
@@ -48,6 +49,10 @@ and 4D 21R5 (build 100156) on macOS, headless with an isolated home folder.
 | Differing child declarations of the same name are resolved together: the highest release satisfying every range, or the one exact tag if it satisfies them, whatever the declaration order. The lock records the chosen tag as `version`. Children come from the final tag. | C6a, C6b |
 | Conflicting child tags (or ranges with no common release) disable the dependency: 4D loads neither component that needs it. It is reported incomplete. | C6c |
 | How 4D combines `latest` or `"4d"` with other child declarations has not been observed. If the first resolution satisfies them all it is kept, with a warning; otherwise the dependency is incomplete. | – |
+| A local (`path`) component's own `Project/Sources/dependencies.json` is read, and what it declares is resolved like the children of a GitHub component. | C6ctl |
+| A relative `path` in `dependencies.json` resolves from the folder that contains the project package, also when a local component declares it. A relative `path` in `environment4d.json` resolves from that file's folder. | R1–R3, R6–R8 |
+| The lock file lists local components with `path`, `found` and their `dependencies` (local ones by their resolved `path` and `found`). A missing one has `path: ""` and `found: false`. | C6ctl, R3, R5, R8 |
+| How 4D resolves a `path` declared by a GitHub component has not been observed. It is not resolved, with a warning. | – |
 | A tag pinned in `dependencies-lock.json` is reused while the declaration is unchanged. `update` ignores pins. | D11, D12, W9, W11 |
 | Offline, a range or `latest` without a pin fails. There is no fallback to an older cached tag. | D10 |
 | Old tags are never removed from the cache. | D9 |
@@ -58,8 +63,10 @@ and 4D 21R5 (build 100156) on macOS, headless with an isolated home folder.
 | tool4d loads exact `tag` entries only and does not recurse, hence `rewrite`. | E-series |
 | tool4d honours `HOME`/`CFFIXED_USER_HOME` (macOS) and `USERPROFILE`, `LOCALAPPDATA` and `APPDATA` together (Windows; both AppData folders must exist or tool4d quits without loading). Real 4D on Windows ignores these overrides. | E-series, W1, W6, debug run 43464410687 |
 
-GitLab dependencies are reported as incomplete. Local-path dependencies are reported with `source: local` and left to the
-caller.
+GitLab dependencies are reported as incomplete. Local-path dependencies are reported with `source: local` and the
+resolved `path`, and their GitHub dependencies are installed, but the local components themselves are left to the
+caller: they are not copied, and one that is missing is only a warning. A local component's `dependencies.json` that
+cannot be parsed, or has the wrong shape, makes it incomplete.
 
 ### Malformed manifests
 

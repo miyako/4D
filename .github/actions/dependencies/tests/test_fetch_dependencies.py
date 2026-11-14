@@ -373,6 +373,108 @@ class Manager(Base):
         self.assertEqual((report["dependencies"]["a"]["source"], report["dependencies"]["a"]["local"]), ("local", "../a"))
         self.assertEqual(report["incomplete"], [])
 
+    # -- local components (miyako/4D#6; real 4D 21.2 build 100653, macOS: cases C6ctl, R1-R8)
+
+    def local_component(self, folder, deps=None, name="L"):
+        (folder / "Project" / "Sources").mkdir(parents=True, exist_ok=True)
+        (folder / "Project" / f"{name}.4DProject").write_text("{}")
+        if deps is not None:
+            (folder / "Project/Sources/dependencies.json").write_text(json.dumps({"dependencies": deps}))
+        return folder
+
+    def lock(self):
+        return json.loads((self.pkg / "userPreferences.u/dependencies-lock.json").read_text())
+
+    def test_github_children_of_a_local_component_are_resolved(self):
+        # C6ctl: 4D reads the local component's dependencies.json and fetches its GitHub dependencies.
+        local = self.local_component(self.tmp / "elsewhere/L.4dbase", {"b": {"github": "o/b", "tag": "21.0"}})
+        self.declare({"L": {"path": str(local)}})
+        report = self.run_manager(FakeGitHub(self.repos()))
+        self.assertEqual(report["incomplete"], [])
+        self.assertEqual(report["resolved"], {"b": "21.0"})
+        self.assertEqual(report["dependencies"]["L"]["source"], "local")
+        self.assertEqual(Path(report["dependencies"]["L"]["path"]), local)
+        self.assertFalse(report["dependencies"]["b"]["primary"])
+        lock = self.lock()["dependencies"]
+        self.assertEqual(lock["L"], {"path": fd.native_path(local), "dependencies": {"b": {"github": "o/b", "tag": "21.0"}},
+                                     "loaded": None, "found": True})
+        self.assertEqual(lock["b"]["tag"], "21.0")
+
+    def test_relative_local_paths_resolve_from_the_package_parent_folder(self):
+        # R1/R6: a relative path in dependencies.json resolves from the folder that contains the project package,
+        # not from the package, its Project or Sources folder, or the working directory.
+        self.local_component(self.tmp / "libs/L.4dbase", {"b": {"github": "o/b", "tag": "21.0"}})
+        for decoy in (self.pkg, self.pkg / "Project", self.pkg / "Project/Sources"):
+            self.local_component(decoy / "libs/L.4dbase", {"a": {"github": "o/a", "tag": "1.0.0"}})
+        self.declare({"L": {"path": "libs/L.4dbase"}})
+        report = self.run_manager(FakeGitHub(self.repos()))
+        self.assertEqual(report["resolved"], {"b": "21.0"})
+        self.assertEqual(Path(report["dependencies"]["L"]["path"]).resolve(), (self.tmp / "libs/L.4dbase").resolve())
+
+    def test_paths_declared_by_a_local_component_resolve_from_the_host_package_parent(self):
+        # R8/R9: also for a local component's own declarations, not from the component's location, and
+        # recursively (local -> local -> GitHub).
+        local = self.local_component(self.tmp / "deep/L.4dbase", {"M": {"path": "M.4dbase"}, "N": {"path": "N.4dbase"},
+                                                                  "Z": {"path": "Z.4dbase"}})
+        self.local_component(self.tmp / "M.4dbase", {"b": {"github": "o/b", "tag": "21.0"}}, "M")
+        self.local_component(self.tmp / "deep/M.4dbase", {"a": {"github": "o/a", "tag": "1.0.0"}}, "M")
+        self.local_component(self.tmp / "N.4dbase", None, "N")
+        self.declare({"L": {"path": str(local)}})
+        report = self.run_manager(FakeGitHub(self.repos()))
+        self.assertEqual(report["resolved"], {"b": "21.0"})
+        self.assertEqual(report["incomplete"], [])
+        lock = self.lock()["dependencies"]
+        # 4D's nested form: a local child that declares dependencies keeps its declared path and gains them (R9);
+        # a leaf, or a missing one, is written with its resolved state (R8, R3).
+        self.assertEqual(lock["L"]["dependencies"], {
+            "M": {"path": "M.4dbase", "dependencies": {"b": {"github": "o/b", "tag": "21.0"}}},
+            "N": {"path": fd.native_path(self.tmp / "N.4dbase"), "loaded": None, "found": True},
+            "Z": {"path": "", "loaded": None, "found": False}})
+        self.assertEqual(lock["M"]["dependencies"], {"b": {"github": "o/b", "tag": "21.0"}})
+
+    def test_environment4d_relative_paths_resolve_from_its_folder(self):
+        # R2 (parent folder) and R7 (package folder).
+        for where in (self.pkg, self.tmp):
+            with self.subTest(where=where):
+                env = where / "environment4d.json"
+                self.local_component(where / "env/L.4dbase", {"b": {"github": "o/b", "tag": "21.0"}})
+                decoy = (self.tmp if where == self.pkg else self.pkg) / "env/L.4dbase"
+                self.local_component(decoy, {"a": {"github": "o/a", "tag": "1.0.0"}})
+                self.declare({"L": {"path": "/nonexistent/L.4dbase"}})
+                env.write_text(json.dumps({"dependencies": {"L": "env/L.4dbase"}}))
+                report = self.run_manager(FakeGitHub(self.repos()))
+                self.assertEqual(report["resolved"], {"b": "21.0"})
+                env.unlink()
+                __import__("shutil").rmtree(where / "env")
+                __import__("shutil").rmtree(decoy.parent)
+
+    def test_missing_local_component_is_not_found_but_left_to_the_caller(self):
+        # R5: 4D writes path "" and found false. Local components stay the caller's responsibility.
+        self.declare({"L": {"path": "missing/L.4dbase"}})
+        report = self.run_manager(FakeGitHub(self.repos()))
+        self.assertEqual(report["incomplete"], [])
+        self.assertIsNone(report["dependencies"]["L"].get("path"))
+        self.assertEqual(self.lock()["dependencies"]["L"], {"path": "", "loaded": None, "found": False})
+        self.assertTrue(any("L: local component not found" in w for w in report["warnings"]))
+
+    def test_unreadable_local_manifest_makes_the_local_component_incomplete(self):
+        local = self.local_component(self.tmp / "L.4dbase")
+        (local / "Project/Sources/dependencies.json").write_text("{")
+        self.declare({"L": {"path": "L.4dbase"}})
+        report = self.run_manager(FakeGitHub(self.repos()))
+        self.assertEqual([i["name"] for i in report["incomplete"]], ["L"])
+        self.assertIn("cannot parse", report["incomplete"][0]["reason"])
+
+    def test_local_path_declared_by_a_github_component_is_not_resolved(self):
+        # Not observed in 4D: left unresolved, as before, with a warning.
+        self.local_component(self.tmp / "c.4dbase", {"b": {"github": "o/b", "tag": "21.0"}}, "c")
+        self.declare({"a": {"github": "o/a", "tag": "1.0.0"}})
+        client = FakeGitHub(self.repos(), {("o/a", "1.0.0"): {"c": {"path": "c.4dbase"}}})
+        report = self.run_manager(client)
+        self.assertEqual(report["resolved"], {"a": "1.0.0"})
+        self.assertNotIn("path", report["dependencies"]["c"])
+        self.assertTrue(any("c: local path declared by o/a@1.0.0" in w for w in report["warnings"]))
+
     # -- real-4D observations from the M9 probes (4D 21.2 build 100653, 4D 21R5 build 100156, macOS)
 
     def test_environment4d_only_declaration_is_ignored(self):
