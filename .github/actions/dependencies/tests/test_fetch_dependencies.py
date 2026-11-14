@@ -428,7 +428,7 @@ class Manager(Base):
         # a leaf, or a missing one, is written with its resolved state (R8, R3).
         self.assertEqual(lock["L"]["dependencies"], {
             "M": {"path": "M.4dbase", "dependencies": {"b": {"github": "o/b", "tag": "21.0"}}},
-            "N": {"path": fd.native_path(self.tmp / "N.4dbase"), "loaded": None, "found": True},
+            "N": {"path": fd.native_path((self.tmp / "N.4dbase").resolve()), "loaded": None, "found": True},
             "Z": {"path": "", "loaded": None, "found": False}})
         self.assertEqual(lock["M"]["dependencies"], {"b": {"github": "o/b", "tag": "21.0"}})
 
