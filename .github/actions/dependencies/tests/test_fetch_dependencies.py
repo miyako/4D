@@ -302,6 +302,237 @@ class Manager(Base):
         self.assertIn("GitLab", reasons["g"])
         self.assertIn("token may be required", reasons["m"])
 
+    # -- manifests (M8 gaps 1 and 2)
+
+    def child_manifest_client(self, body):
+        """Serve `body` as o/a's Project/Sources/dependencies.json through the real parser."""
+        client = FakeGitHub(self.repos())
+        client.child_dependencies = lambda repo, tag: fd.GitHub.child_dependencies(client, repo, tag)
+        client._request = lambda url, accept: body
+        return client
+
+    def test_unparsable_child_manifest_marks_parent_incomplete(self):
+        for body in (b"", b"{", b"\xff\xfe{"):
+            with self.subTest(body=body):
+                self.declare({"a": {"github": "o/a", "tag": "1.0.0"}})
+                report = self.run_manager(self.child_manifest_client(body), "--no-write-lock")
+                self.assertEqual([i["name"] for i in report["incomplete"]], ["a"])
+                self.assertIn("dependencies.json", report["incomplete"][0]["reason"])
+                self.assertEqual(report["resolved"], {})
+
+    def test_wrongly_shaped_child_manifest_marks_parent_incomplete(self):
+        for body in (b"[]", b'{"dependencies": []}', b'{"dependencies": "x"}'):
+            with self.subTest(body=body):
+                self.declare({"a": {"github": "o/a", "tag": "1.0.0"}})
+                report = self.run_manager(self.child_manifest_client(body), "--no-write-lock")
+                self.assertEqual([i["name"] for i in report["incomplete"]], ["a"])
+
+    def test_child_manifest_without_dependencies_is_valid(self):
+        self.declare({"a": {"github": "o/a", "tag": "1.0.0"}})
+        report = self.run_manager(self.child_manifest_client(b"{}"), "--no-write-lock")
+        self.assertEqual((report["resolved"], report["incomplete"]), ({"a": "1.0.0"}, []))
+
+    def test_wrongly_shaped_manifest_is_a_usage_error(self):
+        for text in ("[]", "[1]", '"x"', '{"dependencies": []}', '{"dependencies": null}', '{"dependencies": "o/a"}'):
+            with self.subTest(text=text):
+                (self.pkg / "Project/Sources/dependencies.json").write_text(text)
+                with self.assertRaises(fd.UsageError):
+                    self.run_manager(FakeGitHub(self.repos()))
+
+    def test_wrongly_shaped_environment4d_is_a_usage_error(self):
+        self.declare({})
+        (self.pkg / "environment4d.json").write_text('{"dependencies": []}')
+        with self.assertRaises(fd.UsageError):
+            self.run_manager(FakeGitHub(self.repos()))
+
+    def test_manifest_without_dependencies_is_valid(self):
+        (self.pkg / "Project/Sources/dependencies.json").write_text("{}")
+        report = self.run_manager(FakeGitHub(self.repos()))
+        self.assertEqual((report["dependencies"], report["incomplete"]), ({}, []))
+
+    def test_non_object_declarations_are_incomplete_not_local(self):
+        (self.pkg / "Project/Sources/dependencies.json").write_text(
+            json.dumps({"dependencies": {"s": "o/a", "n": None, "l": [], "a": {"github": "o/a", "tag": "1.0.0"}}}))
+        report = self.run_manager(FakeGitHub(self.repos()))
+        self.assertEqual(sorted(i["name"] for i in report["incomplete"]), ["l", "n", "s"])
+        self.assertEqual(report["resolved"], {"a": "1.0.0"})
+        for name in ("s", "n", "l"):
+            self.assertNotIn("source", report["dependencies"][name])
+
+    def test_non_object_child_declaration_is_incomplete(self):
+        self.declare({"a": {"github": "o/a", "tag": "1.0.0"}})
+        client = FakeGitHub(self.repos(), {("o/a", "1.0.0"): {"b": "o/b"}})
+        report = self.run_manager(client)
+        self.assertEqual([i["name"] for i in report["incomplete"]], ["b"])
+        self.assertNotIn("source", report["dependencies"]["b"])
+
+    def test_environment4d_string_entry_is_still_a_path(self):
+        self.declare({"a": {"github": "o/a", "tag": "1.0.0"}})
+        (self.pkg / "environment4d.json").write_text(json.dumps({"dependencies": {"a": "../a"}}))
+        report = self.run_manager(FakeGitHub(self.repos()))
+        self.assertEqual((report["dependencies"]["a"]["source"], report["dependencies"]["a"]["local"]), ("local", "../a"))
+        self.assertEqual(report["incomplete"], [])
+
+    # -- real-4D observations from the M9 probes (4D 21.2 build 100653, 4D 21R5 build 100156, macOS)
+
+    def test_environment4d_only_declaration_is_ignored(self):
+        # C4a-C4c: 4D neither fetches nor loads a name that only environment4d.json declares.
+        for manifest in (None, {}):
+            with self.subTest(manifest=manifest):
+                path = self.pkg / "Project/Sources/dependencies.json"
+                path.unlink(missing_ok=True)
+                if manifest is not None:
+                    self.declare(manifest)
+                (self.tmp / "environment4d.json").write_text(
+                    json.dumps({"dependencies": {"a": {"github": "o/a", "tag": "1.0.0"}}}))
+                client = FakeGitHub(self.repos())
+                report = self.run_manager(client)
+                self.assertEqual((report["dependencies"], report["incomplete"]), ({}, []))
+                self.assertIn("4D ignores it", report["warnings"][0])
+                self.assertEqual(client.calls, [])
+
+    def test_environment4d_overrides_only_declared_names(self):
+        # C4d: the same file overrides a name that dependencies.json declares.
+        self.declare({"a": {"github": "o/a", "tag": "1.0.0"}})
+        (self.pkg / "environment4d.json").write_text(json.dumps({"dependencies": {
+            "a": {"github": "o/a", "tag": "1.2.0"}, "b": {"github": "o/b", "tag": "21.0"}}}))
+        report = self.run_manager(FakeGitHub(self.repos()))
+        self.assertEqual(report["resolved"], {"a": "1.2.0"})
+
+    def test_children_of_components_overloaded_dependency_are_resolved(self):
+        # C5: the overloaded dependency is installed (errCode 19) and its child is fetched and loaded.
+        self.declare({"a": {"github": "o/a", "tag": "1.0.0"}})
+        (self.pkg / "Components/a.4dbase").mkdir(parents=True)
+        client = FakeGitHub(self.repos(), {("o/a", "1.0.0"): {"b": {"github": "o/b", "tag": "21.0"}}})
+        report = self.run_manager(client)
+        self.assertEqual(report["resolved"], {"a": "1.0.0", "b": "21.0"})
+        self.assertEqual(report["dependencies"]["a"]["errors"][0]["errCode"], 19)
+        self.assertNotIn("overloadedBy", report["dependencies"]["b"])
+
+    def conflict_client(self, first, second):
+        repos = self.repos()
+        repos["o/h"] = [("20.0.1", component_zip("h")), ("20.0.3", component_zip("h"))]
+        return FakeGitHub(repos, {("o/a", "1.0.0"): {"h": dict(first, github="o/h")},
+                                  ("o/a", "1.2.0"): {"h": dict(second, github="o/h")}})
+
+    def declare_two_parents(self, reverse=False):
+        names = [("x", "1.0.0"), ("y", "1.2.0")]
+        self.declare({n: {"github": "o/a", "tag": t} for n, t in (reversed(names) if reverse else names)})
+
+    def test_overlapping_secondary_ranges_resolve_to_their_intersection(self):
+        # C6a/C6b: ^20.0.0 and <20.0.3 give 20.0.1 in either order; the lock version is the chosen tag.
+        for reverse in (False, True):
+            with self.subTest(reverse=reverse):
+                self.declare_two_parents(reverse)
+                report = self.run_manager(self.conflict_client({"version": "^20.0.0"}, {"version": "<20.0.3"}))
+                self.assertEqual(report["resolved"]["h"], "20.0.1")
+                self.assertEqual((report["incomplete"], report["warnings"]), ([], []))
+                lock = json.loads((self.pkg / "userPreferences.u/dependencies-lock.json").read_text())
+                self.assertEqual(lock["dependencies"]["h"]["version"], "20.0.1")
+
+    def test_combined_secondary_ranges_reuse_a_satisfying_pin(self):
+        self.declare_two_parents()
+        self.run_manager(self.conflict_client({"version": "^20.0.0"}, {"version": "<20.0.3"}))
+        client = self.conflict_client({"version": "^20.0.0"}, {"version": "<20.0.3"})
+        client.offline = True
+        report = self.run_manager(client, "--offline")
+        self.assertEqual((report["resolved"]["h"], report["incomplete"]), ("20.0.1", []))
+
+    def test_conflicting_secondary_tags_are_incomplete(self):
+        # C6c: 4D reports a version conflict and loads neither component that needs the dependency.
+        self.declare_two_parents()
+        report = self.run_manager(self.conflict_client({"tag": "20.0.1"}, {"tag": "20.0.3"}))
+        self.assertEqual([i["name"] for i in report["incomplete"]], ["h"])
+        self.assertIn("conflicting tags", report["incomplete"][0]["reason"])
+
+    def test_disjoint_secondary_ranges_are_incomplete(self):
+        self.declare_two_parents()
+        report = self.run_manager(self.conflict_client({"version": ">20.0.1"}, {"version": "<20.0.3"}))
+        self.assertEqual([i["name"] for i in report["incomplete"]], ["h"])
+        self.assertIn("version conflict", report["incomplete"][0]["reason"])
+
+    def test_secondary_conflict_with_latest_is_explicitly_unverified(self):
+        self.declare_two_parents()
+        report = self.run_manager(self.conflict_client({}, {"version": "<20.0.3"}))
+        self.assertEqual([i["name"] for i in report["incomplete"]], ["h"])
+        self.assertIn("not been observed", report["incomplete"][0]["reason"])
+
+    def test_identical_secondary_declarations_are_not_combined(self):
+        self.declare_two_parents()
+        report = self.run_manager(self.conflict_client({"version": "^20.0.0"}, {"version": "^20.0.0"}))
+        self.assertEqual((report["resolved"]["h"], report["incomplete"]), ("20.0.3", []))
+        self.assertNotIn("declarations", report["dependencies"]["h"])
+        lock = json.loads((self.pkg / "userPreferences.u/dependencies-lock.json").read_text())
+        self.assertEqual(lock["dependencies"]["h"]["version"], "^20.0.0")
+
+    def test_compatible_latest_secondary_keeps_first_resolution_with_warning(self):
+        self.declare_two_parents()
+        report = self.run_manager(self.conflict_client({"version": "<20.0.3"}, {}))
+        self.assertEqual((report["resolved"]["h"], report["incomplete"]), ("20.0.1", []))
+        self.assertIn("not been observed", report["warnings"][0])
+
+    def test_secondary_conflict_restarts_with_the_combined_tags_children(self):
+        # Re-resolving a combined dependency can change its children: they come from the final tag only.
+        self.declare_two_parents()
+        client = self.conflict_client({"version": "^20.0.0"}, {"version": "<20.0.3"})
+        client.repos["o/c"] = [("1.0.0", component_zip("c")), ("2.0.0", component_zip("c"))]
+        client.children[("o/h", "20.0.3")] = {"c": {"github": "o/c", "tag": "2.0.0"}}
+        client.children[("o/h", "20.0.1")] = {"c": {"github": "o/c", "tag": "1.0.0"}}
+        report = self.run_manager(client)
+        self.assertEqual((report["resolved"]["h"], report["resolved"]["c"]), ("20.0.1", "1.0.0"))
+
+    # -- archive-store fallback after an online lookup failure (M8 gap 3)
+
+    def store_archive(self):
+        self.declare({"a": {"github": "o/a", "tag": "1.0.0"}})
+        report = self.run_manager(FakeGitHub(self.repos()), "--no-write-lock")
+        self.assertEqual(report["incomplete"], [])
+        self.assertTrue((self.tmp / "store/github/o/a/1.0.0/a.zip").is_file())
+
+    def http_error_client(self, code):
+        client = FakeGitHub(self.repos(), token="secret")
+        client.attempts = 1
+        client.json = lambda path: fd.GitHub.json(client, path)
+
+        def fake_open(request, timeout):
+            raise fd.urllib.error.HTTPError(request.full_url, code, "x", {}, None)
+        client.opener = mock.Mock(open=fake_open)
+        return client
+
+    def test_rejected_token_does_not_fall_back_to_stored_archive(self):
+        for code in (401, 403):
+            with self.subTest(code=code):
+                self.store_archive()
+                report = self.run_manager(self.http_error_client(code), "--no-write-lock")
+                self.assertEqual([i["name"] for i in report["incomplete"]], ["a"])
+                self.assertIn(f"HTTP {code}", report["incomplete"][0]["reason"])
+                self.assertNotIn("secret", json.dumps(report))
+
+    def test_deleted_release_falls_back_to_stored_archive_with_warning(self):
+        self.store_archive()
+        repos = self.repos()
+        repos["o/a"] = [x for x in repos["o/a"] if x[0] != "1.0.0"]
+        report = self.run_manager(FakeGitHub(repos), "--no-write-lock")
+        self.assertEqual((report["resolved"], report["incomplete"]), ({"a": "1.0.0"}, []))
+        self.assertEqual(report["dependencies"]["a"]["source"], "archive")
+        self.assertEqual(len(report["warnings"]), 1)
+        self.assertIn("o/a@1.0.0", report["warnings"][0])
+        self.assertIn("not found", report["warnings"][0])
+
+    def test_outage_falls_back_to_stored_archive_with_warning(self):
+        self.store_archive()
+        client = self.http_error_client(503)
+        with mock.patch.object(fd.time, "sleep"):
+            report = self.run_manager(client, "--no-write-lock")
+        self.assertEqual((report["resolved"], report["incomplete"]), ({"a": "1.0.0"}, []))
+        self.assertEqual(report["dependencies"]["a"]["source"], "archive")
+        self.assertIn("HTTP 503", report["warnings"][0])
+
+    def test_rejected_token_without_stored_archive_is_incomplete(self):
+        self.declare({"a": {"github": "o/a", "tag": "1.0.0"}})
+        report = self.run_manager(self.http_error_client(401), "--no-write-lock")
+        self.assertEqual([i["name"] for i in report["incomplete"]], ["a"])
+
 
 class Policy(unittest.TestCase):
     def test_hosted_runner_requires_tool4d(self):

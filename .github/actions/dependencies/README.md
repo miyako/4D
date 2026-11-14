@@ -32,7 +32,8 @@ By default the step fails when a dependency cannot be resolved or installed (`fa
 
 Each rule below follows what real 4D does. The evidence IDs refer to experiments run against 4D 21R5, 4D 21.2, 4D Server
 21.2 and tool4d 21.0 on macOS, and 4D 21.0 (build 100434) and tool4d on Windows. The Windows real-4D cases W1–W15 are
-recorded in [sonar-4d#4](https://github.com/miyako/sonar-4d/issues/4).
+recorded in [sonar-4d#4](https://github.com/miyako/sonar-4d/issues/4). Cases C4–C6 were run against 4D 21.2 (build 100653)
+and 4D 21R5 (build 100156) on macOS, headless with an isolated home folder.
 
 | Rule | Evidence |
 | --- | --- |
@@ -44,11 +45,14 @@ recorded in [sonar-4d#4](https://github.com/miyako/sonar-4d/issues/4).
 | Ranges (`^`, `~`, `>=`, `x`, `-`, `\|\|`) pick the highest matching release. Prereleases and drafts are ignored. | D7 |
 | Child dependencies come from the component's `Project/Sources/dependencies.json` at the resolved tag, recursively. The lock file is flat. | D8, W7, W8 |
 | A direct declaration wins over a child declaration of the same name. | D14, W14 |
+| Differing child declarations of the same name are resolved together: the highest release satisfying every range, or the one exact tag if it satisfies them, whatever the declaration order. The lock records the chosen tag as `version`. Children come from the final tag. | C6a, C6b |
+| Conflicting child tags (or ranges with no common release) disable the dependency: 4D loads neither component that needs it. It is reported incomplete. | C6c |
+| How 4D combines `latest` or `"4d"` with other child declarations has not been observed. If the first resolution satisfies them all it is kept, with a warning; otherwise the dependency is incomplete. | – |
 | A tag pinned in `dependencies-lock.json` is reused while the declaration is unchanged. `update` ignores pins. | D11, D12, W9, W11 |
 | Offline, a range or `latest` without a pin fails. There is no fallback to an older cached tag. | D10 |
 | Old tags are never removed from the cache. | D9 |
-| A copy in `Components/` with the same name takes precedence. The dependency is still installed and reported with `overloadedBy` and errCode 19, but it is not incomplete. | D13, W13 |
-| `environment4d.json` in the package folder or a parent folder overrides `dependencies.json`. | 4D docs |
+| A copy in `Components/` with the same name takes precedence. The dependency is still installed and reported with `overloadedBy` and errCode 19, but it is not incomplete. Its child dependencies are still resolved and loaded. | D13, W13, C5 |
+| `environment4d.json` in the package folder or a parent folder overrides the names that `dependencies.json` declares. A name declared only in `environment4d.json` is neither fetched nor loaded; it is ignored with a warning. | 4D docs, D17, C4a–C4d |
 | A rejected token (401, or 403 such as SAML enforcement) fails without an anonymous retry. Without release metadata the lock entry has no `tag` and empty `htmlURL`/`archiveURL`. | D15, W15 |
 | A cached tag folder that is no longer a package (for example, its `.4DZ` was deleted) is not loaded and not repaired. The lock keeps the cached `tag` and URLs with `path: ""` and `found: false`, and the dependency is incomplete. | D5, W5 |
 | tool4d loads exact `tag` entries only and does not recurse, hence `rewrite`. | E-series |
@@ -56,6 +60,17 @@ recorded in [sonar-4d#4](https://github.com/miyako/sonar-4d/issues/4).
 
 GitLab dependencies are reported as incomplete. Local-path dependencies are reported with `source: local` and left to the
 caller.
+
+### Malformed manifests
+
+How 4D treats malformed manifests has not been observed, so the action fails explicitly instead of guessing.
+
+- `dependencies.json` or `environment4d.json` that cannot be parsed, whose top level is not an object, or whose
+  `dependencies` is not an object stops the run (exit 2). An empty file is a parse error; `{}` declares nothing.
+- A declaration that is not an object (a string, `null`, a list) is reported incomplete. In `environment4d.json` a string
+  is a path, as documented.
+- A component's own `dependencies.json` (read from its repository at the resolved tag) that cannot be parsed or has the
+  wrong shape makes that component incomplete.
 
 ## Integrity
 
@@ -66,7 +81,10 @@ two modes.
 - **Archive store** (the default when `home` is set). Each downloaded asset is kept in the store with its SHA-256. On
   every run the stored archive is hashed again and compared with the release digest from GitHub (or with the stored digest
   offline), then **extracted afresh** into the cache. A mismatched archive is discarded and downloaded again. Cached folders
-  are therefore never trusted, only re-created from verified archives.
+  are therefore never trusted, only re-created from verified archives. If the online lookup of a stored tag fails because
+  the release is gone or GitHub is unreachable, the stored archive is still used, checked against its recorded digest,
+  with a warning. A rejected token (401, or 403 other than rate limiting) is not worked around: the dependency is
+  incomplete even when an archive is stored.
 - **Shared cache** (`archive-store: none`). An existing tag folder is reused as 4D would reuse it. The report labels this
   reuse `unverified (4D-equivalent)`; a folder that is no longer a package is reported incomplete, not repaired.
 
