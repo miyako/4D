@@ -275,6 +275,11 @@ class GitHub:
                     delay = max(1.0, wait)
                 elif error.code in (429, 500, 502, 503, 504):
                     delay = float(error.headers.get("Retry-After") or 0) or min(2 ** attempt + random.random(), 20)
+                    if delay > 60:
+                        # gitlab.com answers unauthenticated bursts with 429 and Retry-After of many minutes; 4D does
+                        # not wait either (K3: the error is recorded with status 429). Fail now with a clear reason.
+                        raise Failure(f"{self.NAME} rate limit (HTTP {error.code}); retry after {int(delay)} s"
+                                      + ("" if self.token else "; a token raises the limit")) from None
                 elif error.code in (401, 403):
                     raise AuthFailure(f"HTTP {error.code} from {self.NAME}: " + (
                         "token rejected or not authorised for this resource (no anonymous retry, as 4D)"
