@@ -43,6 +43,12 @@ inputs:
       A rejected token fails without an anonymous retry, as in 4D.
     required: false
     default: ""
+  gitlab-token:
+    description: >-
+      Optional GitLab token for private gitlab.com projects and higher rate limits, like 4D's gitlab.json.
+      It is sent to gitlab.com only, never to asset links on other hosts. A read-only token is enough.
+    required: false
+    default: ""
   update:
     description: Ignore tags pinned in dependencies-lock.json.
     required: false
@@ -111,6 +117,7 @@ runs:
         FD_REWRITE: ${{ inputs.rewrite }}
         FD_FAIL_ON_INCOMPLETE: ${{ inputs.fail-on-incomplete }}
         DEPENDENCIES_GITHUB_TOKEN: ${{ inputs.github-token }}
+        DEPENDENCIES_GITLAB_TOKEN: ${{ inputs.gitlab-token }}
       run: |
         python=""
         for candidate in python3 python; do
@@ -142,6 +149,7 @@ runs:
         FD_REWRITE: ${{ inputs.rewrite }}
         FD_FAIL_ON_INCOMPLETE: ${{ inputs.fail-on-incomplete }}
         DEPENDENCIES_GITHUB_TOKEN: ${{ inputs.github-token }}
+        DEPENDENCIES_GITLAB_TOKEN: ${{ inputs.gitlab-token }}
       run: |
         $python = $null
         foreach ($candidate in @('python', 'python3', 'py')) {

@@ -222,6 +222,19 @@ as `github-token`:
 The token is sent to `api.github.com` only, never written to reports, and never retried anonymously if GitHub
 rejects it.
 
+### GitLab components
+
+Components hosted on gitlab.com need 4D 21 R3 or later, and therefore a tool4d R build (4D 21.x doesn't load them).
+Pass a token too, because gitlab.com rate-limits unauthenticated requests per IP address:
+
+{% raw %}
+```yaml
+          gitlab-token: ${{ secrets.GITLAB_READ_TOKEN }}
+```
+{% endraw %}
+
+A read-only token is enough. It is sent to gitlab.com only.
+
 ## 8. Update pinned versions
 
 The lock file pins each resolved tag, and later runs reuse a pin while its declaration is unchanged, as 4D does. To
@@ -252,5 +265,6 @@ python fetch_dependencies.py --project MyProject --runtime tool4d --runtime-vers
 | `offline … no verified archive is stored` | The offline run needs an archive store from an earlier online run. |
 | `not loaded by 4D: its dependency X is disabled by a version conflict` | Two components declare X in ways that can't be combined. 4D wouldn't load them either. |
 | `4D 21 does not load GitLab components` | 4D 21.x, including tool4d 21.0, doesn't load GitLab components. Use a 21 R3 or later runtime, or copy the component into `Components/`. |
-| `private GitLab projects are not supported yet` | The GitLab project is private or doesn't exist. Make it public, or copy the component into `Components/`. |
+| `… not found in GitLab project … (a token may be required …)` | The GitLab project is private or doesn't exist. Pass a token with read access as `gitlab-token`. |
+| `HTTP 429` from GitLab | gitlab.com rate-limits unauthenticated requests per IP address. Pass a `gitlab-token`. |
 | `runtime '4D' is only allowed on self-hosted runners` | Use `runtime: tool4d` on GitHub-hosted runners. |

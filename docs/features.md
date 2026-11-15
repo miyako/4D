@@ -75,12 +75,17 @@ runtime, including tool4d 21.0, a GitLab declaration is reported incomplete.
 - **No `version` means `highest`**, the highest semantic version. **`latest`** is GitLab's latest release, the most
   recently released one, which can be a lower version [H1–H3]. Ranges, exact versions, `tag` and `"4d"` work as for
   GitHub [H4–H7].
-- **Assets are links.** A GitLab release links to the component's zip, which can be hosted anywhere. A single link is
-  used whatever its name. With several links, the one named `<project>.zip` is used; otherwise the component is
-  reported incomplete [GL1, H5].
+- **Assets are links.** A GitLab release links to the component's zip, which can be hosted anywhere. Links are used
+  whatever their name. With several, the first one GitLab lists, the most recently added, is used, even when another is
+  named `<project>.zip` [GL1, K1t, M1t].
 - **Cache:** `.gitlab/<group>/<project>/<tag>/`. When `host` is declared, the host name is added:
   `.gitlab/<host>/<group>/<project>/<tag>/` [GL8].
-- **Public projects only:** private GitLab projects aren't supported yet.
+- **Tokens:** 4D reads a GitLab token from `gitlab.json` in its active folder [K1t]. Pass one with the `gitlab-token`
+  input, or `DEPENDENCIES_GITLAB_TOKEN`. It's needed for private projects and avoids gitlab.com's per-IP rate limit
+  (HTTP 429). It is sent to gitlab.com only.
+- **A component's own dependencies aren't followed.** Unlike GitHub components, 4D installs none of the dependencies a
+  GitLab component declares, whether its `dependencies.json` is at the repository root or in a subfolder [M1t, M2t].
+  The action does the same. Declare those dependencies in your own project instead.
 
 ## Cache, lock and runtimes
 
@@ -127,7 +132,7 @@ runtime, including tool4d 21.0, a GitLab declaration is reported incomplete.
 
 | Item | Behaviour |
 | --- | --- |
-| Private GitLab projects | Reported incomplete: how 4D sends a GitLab token has not been observed |
+| A GitLab token for a self-hosted `host` | Not sent: 4D's `gitlab.json` holds one token without a host |
 | GitLab components with a 4D 21.x runtime (including tool4d 21.0) | Reported incomplete, as 4D 21.1 and 21.2 don't load them |
 | A `path` declared inside a GitHub component | Not resolved, with a warning; not yet observed in 4D |
 | `home` with 4D or 4D Server on Windows | Rejected: those runtimes ignore the profile overrides |

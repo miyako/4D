@@ -42,6 +42,7 @@ Resolution is breadth-first over a queue that starts with the primary declaratio
   - With no `version`, the kind is `highest`.
   - `latest` asks GitLab for its latest release.
   - Only runtimes that load GitLab components (4D 21 R3 and later) accept it.
+  - Its own `dependencies.json` is not read, as in 4D: nothing it declares joins the queue.
 - **Local declaration:** the path is resolved from the folder that contains the host package, or from the folder of the
   `environment4d.json` that supplied it. The component's own `dependencies.json` is read from disk, and its
   declarations join the queue. They also resolve from the host package's parent folder.
