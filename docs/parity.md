@@ -45,7 +45,7 @@ in [miyako/4d-static-analysis#4](https://github.com/miyako/4d-static-analysis/is
 | Local entries in the lock file; missing ones are `path ""` | C6ctl, R3, R5, R8, R9 |
 | An empty `{}` declaration is not looked up next to the package | D1 (local) |
 | Dependency cycles load every component once | Y1–Y4 |
-| GitLab: supported from 21 R3, not in 21.x; `highest` default; `latest` is the most recent release; the first listed link; the token in `gitlab.json`; subfolder manifests ignored; cache and lock format | GL1–GL8, H1–H7, K1t–K3t, M1t |
+| GitLab: supported from 21 R3, not in 21.x; `highest` default; `latest` is the most recent release; the first listed link; the token in `gitlab.json`; its own dependencies not followed; cache and lock format | GL1–GL8, H1–H7, K1t–K3t, M1t, M2t |
 | Pins reused while the declaration is unchanged; `update` ignores them | D11, D12, W9, W11 |
 | Offline: a range or `latest` without a pin fails | D10 |
 | Old tags are never removed | D9 |
@@ -76,7 +76,7 @@ These are handled conservatively, never guessed:
 | Situation | What the emulator does |
 | --- | --- |
 | A GitLab token for a self-hosted `host` | Not sent |
-| A GitLab component with a root `Project/Sources/dependencies.json`, and upcoming GitLab releases | Root manifest read, as for GitHub; upcoming releases skipped |
+| Upcoming GitLab releases | Skipped |
 | A `path` declared inside a GitHub component | Leaves it unresolved, with a warning |
 | A malformed `dependencies.json` or `environment4d.json` | Stops the run |
 | A cycle that passes through GitHub releases | Resolves it like a local cycle (Y1–Y4); not tested with releases |

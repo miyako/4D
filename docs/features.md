@@ -83,8 +83,9 @@ runtime, including tool4d 21.0, a GitLab declaration is reported incomplete.
 - **Tokens:** 4D reads a GitLab token from `gitlab.json` in its active folder [K1t]. Pass one with the `gitlab-token`
   input, or `DEPENDENCIES_GITLAB_TOKEN`. It's needed for private projects and avoids gitlab.com's per-IP rate limit
   (HTTP 429). It is sent to gitlab.com only.
-- **A component's own dependencies:** 4D doesn't read a `dependencies.json` that sits in a subfolder of the repository
-  [M1t]. The action reads `Project/Sources/dependencies.json` at the repository root, as for GitHub.
+- **A component's own dependencies aren't followed.** Unlike GitHub components, 4D installs none of the dependencies a
+  GitLab component declares, whether its `dependencies.json` is at the repository root or in a subfolder [M1t, M2t].
+  The action does the same. Declare those dependencies in your own project instead.
 
 ## Cache, lock and runtimes
 

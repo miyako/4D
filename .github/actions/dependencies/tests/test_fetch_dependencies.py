@@ -848,6 +848,12 @@ class GitLabSupport(Base):
                          ("https://gitlab.com/miyako-group/wavplay/-/releases/", "", False))
         self.assertNotIn("tag", item)
 
+    def test_a_gitlab_components_own_dependencies_are_not_followed(self):
+        # M1t, M2t: 4D 21 R5 installs neither child, whether the manifest is at the root or in a subfolder.
+        client = fd.GitLab("https://gitlab.com")
+        client._request = mock.Mock(side_effect=AssertionError("no request expected"))
+        self.assertIsNone(client.child_dependencies("miyako-group/wavplay", "20.0.7"))
+
     def test_with_several_links_the_first_listed_is_used(self):
         # K1t: 20.0.5 lists component.zip (added last) before wavplay.zip; 4D used component.zip.
         releases = [("20.0.5", [("component.zip", self.B), ("wavplay.zip", self.A)])]

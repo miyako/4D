@@ -421,21 +421,10 @@ class GitLab(GitHub):
         return out
 
     def child_dependencies(self, repo: str, tag: str):
-        """Read at the repository root, as for GitHub (GL1: no root manifest gives `dependencies: null`)."""
-        url = self._api(repo, f"/repository/files/Project%2FSources%2Fdependencies.json/raw?ref={urllib.parse.quote(tag, safe='')}")
-        try:
-            data = self._request(url, "application/octet-stream")
-        except LookupError:
-            return None
-        where = f"Project/Sources/dependencies.json of GitLab {repo}@{tag}"
-        try:
-            value = json.loads(data.decode("utf-8-sig"))
-        except ValueError as error:
-            raise Failure(f"cannot parse {where}: {error}") from None
-        try:
-            return manifest_dependencies(value) or None
-        except ValueError as error:
-            raise Failure(f"invalid {where}: {error}") from None
+        """4D 21 R5 does not follow a GitLab component's own dependencies: with a root
+        Project/Sources/dependencies.json (M2t) or one in a subfolder (M1t), it writes `dependencies: null` and
+        installs neither child. No request is made."""
+        return None
 
     def download(self, asset: dict) -> bytes:
         return self._request(asset["url"], "application/octet-stream")
