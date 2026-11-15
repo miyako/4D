@@ -251,5 +251,6 @@ python fetch_dependencies.py --project MyProject --runtime tool4d --runtime-vers
 | `HTTP 401` / `HTTP 403` | GitHub rejected the token, for example because of SAML enforcement. There is no anonymous retry. |
 | `offline … no verified archive is stored` | The offline run needs an archive store from an earlier online run. |
 | `not loaded by 4D: its dependency X is disabled by a version conflict` | Two components declare X in ways that can't be combined. 4D wouldn't load them either. |
-| `GitLab dependencies are not supported` | Install that component another way, for example by copying it into `Components/`. |
+| `4D 21 does not load GitLab components` | 4D 21.x, including tool4d 21.0, doesn't load GitLab components. Use a 21 R3 or later runtime, or copy the component into `Components/`. |
+| `private GitLab projects are not supported yet` | The GitLab project is private or doesn't exist. Make it public, or copy the component into `Components/`. |
 | `runtime '4D' is only allowed on self-hosted runners` | Use `runtime: tool4d` on GitHub-hosted runners. |

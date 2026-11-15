@@ -61,6 +61,27 @@ Each feature follows what real 4D does. The case IDs in brackets refer to the ex
   left to you.
 - **Missing local components** are a warning, written to the lock as `path: ""`, `found: false`, as in 4D.
 
+## GitLab components
+
+4D 21 R3 and later load components hosted on GitLab; 4D 21.1 and 21.2 don't [GL1]. The action follows that: with a 21.x
+runtime, including tool4d 21.0, a GitLab declaration is reported incomplete.
+
+```json
+"wavplay": {"gitlab": "miyako-group/wavplay", "version": "^20.0.0"}
+```
+
+- **`host`** declares a self-hosted GitLab, for example `"host": "https://gitlab.example.com"`. The default is
+  gitlab.com [GL8].
+- **No `version` means `highest`**, the highest semantic version. **`latest`** is GitLab's latest release, the most
+  recently released one, which can be a lower version [H1–H3]. Ranges, exact versions, `tag` and `"4d"` work as for
+  GitHub [H4–H7].
+- **Assets are links.** A GitLab release links to the component's zip, which can be hosted anywhere. A single link is
+  used whatever its name. With several links, the one named `<project>.zip` is used; otherwise the component is
+  reported incomplete [GL1, H5].
+- **Cache:** `.gitlab/<group>/<project>/<tag>/`. When `host` is declared, the host name is added:
+  `.gitlab/<host>/<group>/<project>/<tag>/` [GL8].
+- **Public projects only:** private GitLab projects aren't supported yet.
+
 ## Cache, lock and runtimes
 
 - **Cache layout:** components are installed in 4D's layout:
@@ -106,7 +127,8 @@ Each feature follows what real 4D does. The case IDs in brackets refer to the ex
 
 | Item | Behaviour |
 | --- | --- |
-| GitLab components | Reported incomplete |
+| Private GitLab projects | Reported incomplete: how 4D sends a GitLab token has not been observed |
+| GitLab components with a 4D 21.x runtime (including tool4d 21.0) | Reported incomplete, as 4D 21.1 and 21.2 don't load them |
 | A `path` declared inside a GitHub component | Not resolved, with a warning; not yet observed in 4D |
 | `home` with 4D or 4D Server on Windows | Rejected: those runtimes ignore the profile overrides |
 | Copying local components | Left to the caller |

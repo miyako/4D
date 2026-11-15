@@ -37,6 +37,11 @@ Resolution is breadth-first over a queue that starts with the primary declaratio
 
   The component's own `dependencies.json` is fetched from its repository at the resolved tag, through the contents API,
   and its declarations join the queue as **secondary** declarations.
+- **GitLab declaration:** resolved the same way, against the GitLab releases API of `host` (default gitlab.com).
+  - The release asset is a link, followed to wherever the zip is hosted.
+  - With no `version`, the kind is `highest`.
+  - `latest` asks GitLab for its latest release.
+  - Only runtimes that load GitLab components (4D 21 R3 and later) accept it.
 - **Local declaration:** the path is resolved from the folder that contains the host package, or from the folder of the
   `environment4d.json` that supplied it. The component's own `dependencies.json` is read from disk, and its
   declarations join the queue. They also resolve from the host package's parent folder.

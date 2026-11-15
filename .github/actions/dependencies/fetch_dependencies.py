@@ -189,14 +189,17 @@ def satisfies(tag: str, sets) -> bool:
     return any(all(ops[op](bound) for op, bound in constraints) for constraints in sets)
 
 
-def classify(spec: dict, anchor):
-    """Return (kind, value, lockVersion); kind is tag | latest | anchor | range."""
+def classify(spec: dict, anchor, gitlab: bool = False):
+    """Return (kind, value, lockVersion); kind is tag | latest | highest | anchor | range.
+    For GitLab, no version means "highest", the highest semantic version (4D 21R5: GL2, H1)."""
     if spec.get("tag"):
         return "tag", str(spec["tag"]), None
     version = spec.get("version")
     if version is None or str(version).strip() == "":
-        return "latest", None, "latest"
+        return ("highest", None, "highest") if gitlab else ("latest", None, "latest")
     version = str(version).strip()
+    if gitlab and version.lower() == "highest":
+        return "highest", None, version
     if version.lower() == "latest":
         return "latest", None, version
     if version.lower() == "4d":
@@ -222,11 +225,19 @@ class GitHub:
     401/403 (bad token, SAML) are hard failures with no anonymous retry, as in 4D.
     429/5xx/network errors get bounded backoff."""
 
+    NAME = "GitHub"
+
     def __init__(self, token=None, offline=False, attempts=4):
         self.token = token or None
         self.offline = offline
         self.attempts = attempts
         self.opener = urllib.request.build_opener(_NoRedirect)
+
+    def headers(self, url: str, accept: str) -> dict:
+        headers = {"Accept": accept, "User-Agent": USER_AGENT, "X-GitHub-Api-Version": "2022-11-28"}
+        if self.token and urllib.parse.urlsplit(url).hostname == "api.github.com":
+            headers["Authorization"] = "Bearer " + self.token
+        return headers
 
     def _request(self, url: str, accept: str) -> bytes:
         if self.offline:
@@ -237,9 +248,7 @@ class GitHub:
             delay = 0.0
             try:
                 for _ in range(6):
-                    headers = {"Accept": accept, "User-Agent": USER_AGENT, "X-GitHub-Api-Version": "2022-11-28"}
-                    if self.token and urllib.parse.urlsplit(current).hostname == "api.github.com":
-                        headers["Authorization"] = "Bearer " + self.token
+                    headers = self.headers(current, accept)
                     try:
                         with self.opener.open(urllib.request.Request(current, headers=headers), timeout=60) as r:
                             if int(r.headers.get("Content-Length") or 0) > MAX_ARCHIVE:
@@ -259,13 +268,13 @@ class GitHub:
                 if error.code in (403, 429) and error.headers.get("X-RateLimit-Remaining") == "0":
                     wait = float(error.headers.get("X-RateLimit-Reset") or 0) - time.time()
                     if wait > 60:
-                        raise Failure(f"GitHub API rate limit exhausted (HTTP {error.code})"
+                        raise Failure(f"{self.NAME} API rate limit exhausted (HTTP {error.code})"
                                       + ("" if self.token else "; a token raises the limit")) from None
                     delay = max(1.0, wait)
                 elif error.code in (429, 500, 502, 503, 504):
                     delay = float(error.headers.get("Retry-After") or 0) or min(2 ** attempt + random.random(), 20)
                 elif error.code in (401, 403):
-                    raise AuthFailure(f"HTTP {error.code} from GitHub: " + (
+                    raise AuthFailure(f"HTTP {error.code} from {self.NAME}: " + (
                         "token rejected or not authorised for this resource (no anonymous retry, as 4D)"
                         if self.token else "access denied")) from None
                 elif error.code == 404:
@@ -338,6 +347,123 @@ class GitHub:
         if self.token:
             return self._request(asset["url"], "application/octet-stream")
         return self._request(asset["browser_download_url"], "application/octet-stream")
+
+
+class GitLab(GitHub):
+    """GitLab releases, as 4D 21 R3 to 21 R5 read them (GL1-GL8, H1-H7 in the README).
+
+    A release's assets are links, not uploads: the component zip lives elsewhere (GitLab's package registry or
+    another server) and the link points to it. GitLab exposes no digest or size, so a download is verified only
+    against the archive store's own record. Tokens for private projects are not supported yet: how 4D stores and
+    sends a GitLab token has not been observed."""
+
+    NAME = "GitLab"
+
+    def __init__(self, host="https://gitlab.com", offline=False, attempts=4):
+        super().__init__(None, offline, attempts)
+        self.host = host.rstrip("/")
+
+    def headers(self, url: str, accept: str) -> dict:
+        return {"Accept": accept, "User-Agent": USER_AGENT}
+
+    def _hint(self):
+        return " (private GitLab projects are not supported yet)"
+
+    def _api(self, repo: str, rest: str = "") -> str:
+        return f"{self.host}/api/v4/projects/{urllib.parse.quote(repo, safe='')}{rest}"
+
+    def json(self, url: str):
+        return json.loads(self._request(url, "application/json"))
+
+    @staticmethod
+    def normalise(repo: str, release: dict) -> dict:
+        tag = release["tag_name"]
+        links = (release.get("assets") or {}).get("links") or []
+        return {"tag_name": tag, "html_url": f"/{repo}/-/tags/{tag}", "upcoming": bool(release.get("upcoming_release")),
+                "assets": [{"name": link.get("name"), "id": link.get("id"),
+                            "url": link.get("direct_asset_url") or link.get("url"),
+                            "browser_download_url": link.get("direct_asset_url") or link.get("url")}
+                           for link in links]}
+
+    def release(self, repo: str, kind: str, value=None):
+        try:
+            if kind == "latest":
+                # GitLab's latest release is the most recently released one, not the highest (H3).
+                return self.normalise(repo, self.json(self._api(repo, "/releases/permalink/latest")))
+            if kind == "tag":
+                return self.normalise(repo, self.json(self._api(repo, f"/releases/{urllib.parse.quote(value, safe='')}")))
+        except LookupError:
+            what = "latest release" if kind == "latest" else f"release {value!r}"
+            raise NotFound(f"{what} not found in GitLab project {repo}{self._hint()}") from None
+        if kind == "highest":
+            kind, value = "range", parse_range("*")
+        return super().release(repo, kind, value)
+
+    def releases(self, repo: str):
+        out = []
+        for page in range(1, 11):
+            try:
+                batch = self.json(self._api(repo, f"/releases?per_page=100&page={page}"))
+            except LookupError:
+                raise NotFound(f"GitLab project {repo} not found{self._hint()}") from None
+            # Upcoming releases (a future release date) are skipped; how 4D treats them has not been observed.
+            out += [r for r in (self.normalise(repo, item) for item in batch) if not r["upcoming"]]
+            if len(batch) < 100:
+                break
+        return out
+
+    def child_dependencies(self, repo: str, tag: str):
+        """Read at the repository root, as for GitHub (GL1: no root manifest gives `dependencies: null`)."""
+        url = self._api(repo, f"/repository/files/Project%2FSources%2Fdependencies.json/raw?ref={urllib.parse.quote(tag, safe='')}")
+        try:
+            data = self._request(url, "application/octet-stream")
+        except LookupError:
+            return None
+        where = f"Project/Sources/dependencies.json of GitLab {repo}@{tag}"
+        try:
+            value = json.loads(data.decode("utf-8-sig"))
+        except ValueError as error:
+            raise Failure(f"cannot parse {where}: {error}") from None
+        try:
+            return manifest_dependencies(value) or None
+        except ValueError as error:
+            raise Failure(f"invalid {where}: {error}") from None
+
+    def download(self, asset: dict) -> bytes:
+        return self._request(asset["url"], "application/octet-stream")
+
+
+class Source:
+    """Where a component comes from: a GitHub repository, or a GitLab project on a host."""
+
+    def __init__(self, provider: str, repo: str, client, host: str | None = None):
+        self.provider, self.repo, self.client, self.host = provider, repo, client, host
+
+    @property
+    def gitlab(self) -> bool:
+        return self.provider == "gitlab"
+
+    @property
+    def host_name(self) -> str:
+        return urllib.parse.urlsplit(self.host or "https://gitlab.com").hostname or "gitlab.com"
+
+    def cache_folder(self, dependencies_folder: Path) -> Path:
+        if not self.gitlab:
+            return dependencies_folder / ".github" / self.repo
+        # 21R5: a declared host adds its name to the path (GL8); without one there is none (GL1).
+        base = dependencies_folder / ".gitlab"
+        return (base / self.host_name if self.host else base) / self.repo
+
+    def store_folder(self, archive_store: Path) -> Path:
+        return archive_store / ("gitlab" if self.gitlab else "github") / (self.host_name if self.gitlab else "") / self.repo
+
+    def matches(self, pin: dict) -> bool:
+        if self.gitlab:
+            return pin.get("gitlab") == self.repo and (pin.get("host") or None) == (self.host or None)
+        return pin.get("github") == self.repo
+
+    def __str__(self):
+        return self.repo
 
 
 # ---------------------------------------------------------------- filesystem
@@ -546,9 +672,11 @@ def component_override(package: Path, name: str):
 # ---------------------------------------------------------------- manager
 
 class Manager:
-    def __init__(self, args, client: GitHub):
+    def __init__(self, args, client: GitHub, gitlab=None):
         self.args = args
         self.client = client
+        self.gitlab_factory = gitlab or (lambda host: GitLab(host, offline=client.offline))
+        self.gitlab_clients = {}
         self.runtime = args.runtime
         self.anchor, self.version_code = runtime_anchor(args.runtime_version) if args.runtime_version else (None, None)
         self.home = Path(args.home).resolve() if args.home else None
@@ -594,7 +722,8 @@ class Manager:
             return {}
         try:
             entries = json.loads(self.lock_path.read_text("utf-8-sig")).get("dependencies") or {}
-            return {n: e for n, e in entries.items() if isinstance(e, dict) and e.get("tag") and e.get("github")}
+            return {n: e for n, e in entries.items()
+                    if isinstance(e, dict) and e.get("tag") and (e.get("github") or e.get("gitlab"))}
         except (OSError, ValueError, AttributeError):
             self.warnings.append(f"ignored unreadable lock file {self.lock_path}")
             return {}
@@ -653,7 +782,7 @@ class Manager:
             # Paths declared by a local component also resolve from the host package's parent folder (R8).
             # How 4D resolves a path declared by a GitHub component has not been observed.
             local = entry.get("source") == "local"
-            origin = None if local else f"{entry.get('github')}@{entry.get('tag')}"
+            origin = None if local else f"{entry.get('github') or entry.get('gitlab')}@{entry.get('tag')}"
             for child, child_spec in (entry.get("dependencies") or {}).items():
                 queue.append((child, child_spec, False, host if local else None, origin, name))
         # C6c, T3, T4, V1, V2, A1: 4D loads a dependency whose declarations conflict, as first declared, but
@@ -663,16 +792,16 @@ class Manager:
                 self.disable(self.results[parent], name)
         return False
 
-    def pick(self, name, repo, spec, pins):
-        """Resolve one GitHub declaration on its own. Returns (tag, release, lockVersion, pinned)."""
-        kind, value, lock_version = classify(spec, self.anchor)
+    def pick(self, name, src, spec, pins):
+        """Resolve one declaration on its own. Returns (tag, release, lockVersion, pinned)."""
+        kind, value, lock_version = classify(spec, self.anchor, gitlab=src.gitlab)
         pin = pins.get(name)
-        if (kind != "tag" and pin and pin["github"] == repo and (pin.get("version") or None) == lock_version
+        if (kind != "tag" and pin and src.matches(pin) and (pin.get("version") or None) == lock_version
                 and (kind != "range" or satisfies(pin["tag"], value))):
             return pin["tag"], None, lock_version, True
         if kind == "tag":
             return value, None, lock_version, False
-        release = self.client.release(repo, kind, value)
+        release = src.client.release(src.repo, kind, value)
         return release["tag_name"], release, lock_version, False
 
     @staticmethod
@@ -755,7 +884,7 @@ class Manager:
             state = ("tag", result[0])
         if result:
             return result[0], result[1], None if conflict else result[0], conflict
-        tag, release, lock_version, _ = self.pick(name, repo, specs[0], pins)
+        tag, release, lock_version, _ = self.pick(name, Source("github", repo, self.client), specs[0], pins)
         return tag, release, lock_version, conflict
 
     def disable(self, entry, dependency):
@@ -811,14 +940,14 @@ class Manager:
         if not isinstance(spec, dict):
             return self.fail(entry, f"invalid declaration {json.dumps(spec)}: expected a JSON object")
         if spec.get("gitlab"):
-            entry["gitlab"] = spec["gitlab"]
-            return self.fail(entry, "GitLab dependencies are not supported by this emulator")
+            return self.resolve_gitlab(entry, spec, pins)
         if not spec.get("github"):
             return self.resolve_local(entry, spec, base or self.package.parent, declared_by)
         repo = str(spec["github"]).strip("/")
         if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo):
             return self.fail(entry, f"invalid github repository {repo!r}")
         entry["github"] = repo
+        src = Source("github", repo, self.client)
         try:
             if combined:
                 tag, release, lock_version, conflict = self.combined_release(name, repo, combined, pins)
@@ -826,14 +955,66 @@ class Manager:
                     self.conflicts[name] = conflict
                     entry.setdefault("errors", []).append({"message": conflict})
             else:
-                tag, release, lock_version, pinned = self.pick(name, repo, spec, pins)
+                tag, release, lock_version, pinned = self.pick(name, src, spec, pins)
                 if pinned:
                     entry["pinned"] = True
             if lock_version:
                 entry["version"] = lock_version
             entry["tag"] = tag
-            self.materialise(entry, repo, tag, release)
+            self.materialise(entry, src, tag, release)
         except Failure as error:
+            return self.fail(entry, str(error))
+        return self.finish(entry, name)
+
+    def gitlab_support(self):
+        """Return the reason this runtime does not load GitLab components, or None.
+        Observed: 4D 21 R3, 21 R4 and 21 R5 load them; 4D 21.1 and 21.2 (the 21.x line) do not."""
+        if not self.anchor:
+            self.warnings.append("GitLab components: 4D loads them from 21 R3 (not in 21.1 or 21.2); pass the runtime "
+                                 "version to check this runtime")
+            return None
+        m = re.match(r"^(\d+)(?:R(\d+))?$", self.anchor)
+        major, release = int(m.group(1)), m.group(2)
+        if release is not None and (major, int(release)) >= (21, 3):
+            return None
+        if release is None and major == 21:
+            return f"4D {self.anchor} does not load GitLab components (observed in 21.1 and 21.2; 21 R3 and later do)"
+        if release is None and major > 21:
+            self.warnings.append(f"GitLab components: support in 4D {self.anchor} has not been observed")
+            return None
+        return f"GitLab support in 4D {self.anchor} has not been observed (observed only in 21 R3 to 21 R5)"
+
+    def resolve_gitlab(self, entry, spec, pins):
+        name = entry["name"]
+        repo = str(spec["gitlab"]).strip("/")
+        entry["gitlab"] = repo
+        host = spec.get("host")
+        if host is not None:
+            entry["host"] = host
+        if not re.match(r"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$", repo):
+            return self.fail(entry, f"invalid gitlab project {repo!r}")
+        if host is not None and (not isinstance(host, str) or not re.match(r"^https://[A-Za-z0-9.-]+(:\d+)?/?$", host)):
+            return self.fail(entry, f"invalid gitlab host {host!r}: expected https://<host>")
+        unsupported = self.gitlab_support()
+        if unsupported:
+            return self.fail(entry, unsupported)
+        base = (host or "https://gitlab.com").rstrip("/")
+        if base not in self.gitlab_clients:
+            self.gitlab_clients[base] = self.gitlab_factory(base)
+        src = Source("gitlab", repo, self.gitlab_clients[base], host)
+        try:
+            tag, release, lock_version, pinned = self.pick(name, src, spec, pins)
+            if pinned:
+                entry["pinned"] = True
+            if lock_version:
+                entry["version"] = lock_version
+            entry["tag"] = tag
+            self.materialise(entry, src, tag, release)
+        except Failure as error:
+            if not entry.get("htmlURL"):
+                # GL7: without the release 4D links to the project's releases page and leaves archiveURL empty.
+                entry.update(htmlURL=f"{base}/{repo}/-/releases/", archiveURL="")
+                entry.pop("tag", None)
             return self.fail(entry, str(error))
         return self.finish(entry, name)
 
@@ -845,8 +1026,9 @@ class Manager:
                                 f"A component with the same name ({name}) is already loaded from {override}"})
         return entry
 
-    def materialise(self, entry, repo, tag, release):
-        repo_folder = self.dependencies_folder / ".github" / repo
+    def materialise(self, entry, src, tag, release):
+        repo, client = src.repo, src.client
+        repo_folder = src.cache_folder(self.dependencies_folder)
         target = repo_folder / tag
         meta_path = repo_folder / f"{tag}.json"
         if self.archive_store is None and target.is_dir() and meta_path.is_file():
@@ -862,24 +1044,25 @@ class Manager:
         source = "download"
         archive = meta = None
         if self.archive_store is not None:
-            archive, meta, source = self.archived(repo, tag, release)
+            archive, meta, source = self.archived(src, tag, release)
         with tempfile.TemporaryDirectory(prefix=".fetch-", dir=repo_folder) as tmp:
             tmp = Path(tmp)
             if archive is None:
-                release = release or self.client.release(repo, "tag", tag)
-                asset = self.asset(release, repo)
-                data = self.client.download(asset)
+                release = release or client.release(repo, "tag", tag)
+                asset = self.asset(release, src)
+                data = client.download(asset)
                 self.check_digest(data, asset)
-                archive = tmp / asset["name"]
+                archive = tmp / "archive.zip"
                 archive.write_bytes(data)
-                meta = self.meta(release, asset, repo)
-                meta["dependencies"] = self.client.child_dependencies(repo, tag)
+                meta = self.meta(release, asset, src, len(data))
+                meta["dependencies"] = client.child_dependencies(repo, tag)
             root = safe_extract(archive, tmp / "x")
             with file_lock(repo_folder / f".{tag}.lock"):
                 installed = install_tree(root, target, replace=self.archive_store is not None)
                 if installed or not meta_path.exists():
-                    write_json(meta_path, {k: meta.get(k) for k in
-                                           ("github", "tag", "htmlURL", "archiveURL", "archiveSize", "dependencies")})
+                    keys = (("tag", "htmlURL", "archiveURL", "archiveSize", "dependencies", "gitlab", "host") if src.gitlab
+                            else ("github", "tag", "htmlURL", "archiveURL", "archiveSize", "dependencies"))
+                    write_json(meta_path, {k: meta.get(k) for k in keys})
         if self.archive_store is not None:
             reuse = "verified archive"
         else:
@@ -889,11 +1072,25 @@ class Manager:
         entry.update({k: meta.get(k) for k in ("htmlURL", "archiveURL", "archiveSize", "dependencies")})
 
     @staticmethod
-    def asset(release, repo):
-        name = repo.split("/")[1] + ".zip"
-        asset = next((a for a in release.get("assets") or [] if a.get("name") == name), None)
+    def asset(release, src):
+        assets = release.get("assets") or []
+        name = src.repo.split("/")[-1] + ".zip"
+        if src.gitlab:
+            # GitLab assets are links. A single link is used whatever its name (GL1: "wavplay-21.0.3.zip");
+            # with several, 4D used the one named after the project (H5), which here was also listed first.
+            named = [a for a in assets if a.get("name") == name]
+            if len(assets) == 1:
+                return assets[0]
+            if len(named) == 1:
+                return named[0]
+            if not assets:
+                raise Failure(f"cannot determine the archive URL of GitLab release {release.get('tag_name')} "
+                              f"of {src.repo}: the release has no asset link")
+            raise Failure(f"GitLab release {release.get('tag_name')} of {src.repo} has {len(assets)} asset links and "
+                          f"none named {name}; how 4D chooses between them has not been observed")
+        asset = next((a for a in assets if a.get("name") == name), None)
         if not asset:
-            raise Failure(f"release {release.get('tag_name')} of {repo} has no {name} asset")
+            raise Failure(f"release {release.get('tag_name')} of {src.repo} has no {name} asset")
         return asset
 
     @staticmethod
@@ -906,34 +1103,40 @@ class Manager:
             raise Failure(f"{asset.get('name')}: size does not match the release asset")
         return actual
 
-    def meta(self, release, asset, repo):
-        return {"github": repo, "tag": release["tag_name"], "htmlURL": release.get("html_url"),
-                "archiveURL": asset["url"] if self.client.token else asset["browser_download_url"],
-                "archiveSize": asset.get("size"), "asset": asset.get("name"), "assetId": asset.get("id"),
-                "digest": asset.get("digest")}
+    def meta(self, release, asset, src, size=None):
+        meta = {"tag": release["tag_name"], "htmlURL": release.get("html_url"),
+                "archiveURL": asset["url"] if src.client.token else asset["browser_download_url"],
+                "archiveSize": asset.get("size") if asset.get("size") is not None else size,
+                "asset": asset.get("name"), "assetId": asset.get("id"), "digest": asset.get("digest")}
+        if src.gitlab:
+            meta.update(gitlab=src.repo, host=src.host)
+        else:
+            meta["github"] = src.repo
+        return meta
 
-    def archived(self, repo, tag, release):
+    def archived(self, src, tag, release):
         """Return (archive, meta, source) from the verified archive store, downloading on a miss.
         A stored archive is re-hashed on every use and checked against the current release
         digest (online) or the digest recorded when it was stored (offline)."""
-        folder = self.archive_store / "github" / repo / tag
+        repo, client = src.repo, src.client
+        folder = src.store_folder(self.archive_store) / tag
         meta_path = folder / "meta.json"
-        with file_lock(self.archive_store / "github" / repo / f".{tag}.lock"):
+        with file_lock(src.store_folder(self.archive_store) / f".{tag}.lock"):
             stored = None
             if meta_path.is_file():
                 with contextlib.suppress(OSError, ValueError):
                     stored = json.loads(meta_path.read_text("utf-8"))
             current, lookup_error = None, None
-            if not self.client.offline:
+            if not client.offline:
                 try:
-                    release = release or self.client.release(repo, "tag", tag)
-                    current = self.asset(release, repo)
+                    release = release or client.release(repo, "tag", tag)
+                    current = self.asset(release, src)
                 except AuthFailure:
                     raise  # a rejected token is not an outage: no fallback, as 4D does not retry
                 except Failure as error:
                     lookup_error = error
             if stored and stored.get("asset"):
-                archive = folder / stored["asset"]
+                archive = folder / stored.get("file", stored["asset"])
                 expected = (current or {}).get("digest") or stored.get("digest")
                 if archive.is_file():
                     actual = sha256_file(archive)
@@ -945,23 +1148,28 @@ class Manager:
                     self.warnings.append(f"{repo}@{tag}: stored archive failed verification; discarded")
             if current is None:
                 raise lookup_error or Failure(f"{repo}@{tag}: offline and no verified archive is stored")
-            data = self.client.download(current)
-            meta = self.meta(release, current, repo)
+            data = client.download(current)
+            meta = self.meta(release, current, src, len(data))
             meta["sha256"] = self.check_digest(data, current)
-            meta["dependencies"] = self.client.child_dependencies(repo, tag)
+            meta["dependencies"] = client.child_dependencies(repo, tag)
+            # A GitLab link name is free text; store the archive under a fixed, safe file name.
+            meta["file"] = current["name"] if not src.gitlab else "archive.zip"
             folder.mkdir(parents=True, exist_ok=True)
             fd, tmp = tempfile.mkstemp(prefix=".archive.", dir=folder)
             with os.fdopen(fd, "wb") as f:
                 f.write(data)
-            os.replace(tmp, folder / current["name"])
+            os.replace(tmp, folder / meta["file"])
             write_json(meta_path, meta)
-            return folder / current["name"], meta, "download"
+            return folder / meta["file"], meta, "download"
 
     def write_lock(self):
         lock = {"version": self.version_code, "dependencies": {}} if self.version_code else {"dependencies": {}}
         for name, entry in sorted(self.results.items()):
             if entry.get("source") == "local":
                 lock["dependencies"][name] = self.local_lock_item(entry)
+                continue
+            if entry.get("gitlab"):
+                lock["dependencies"][name] = self.gitlab_lock_item(entry)
                 continue
             if not entry.get("github"):
                 continue
@@ -983,6 +1191,22 @@ class Manager:
                 item["errors"] = [{"message": entry["error"]}]
             lock["dependencies"][name] = item
         write_json(self.lock_path, lock)
+
+    def gitlab_lock_item(self, entry):
+        """As 4D 21R5 writes a GitLab entry (GL1-GL8): no archiveSize and no dependencies, `host` only when
+        declared, and a relative htmlURL."""
+        item = {"gitlab": entry["gitlab"]}
+        for key in ("host", "version", "tag", "htmlURL", "archiveURL"):
+            if entry.get(key) is not None:
+                item[key] = entry[key]
+        item["path"] = native_path(Path(entry["path"])) if entry.get("path") else ""
+        item["found"] = bool(entry.get("path")) and (not entry.get("error") or bool(entry.get("disabled")))
+        item["loaded"] = False if entry.get("disabled") else None
+        if entry.get("errors"):
+            item["errors"] = entry["errors"]
+        elif entry.get("error"):
+            item["errors"] = [{"message": entry["error"]}]
+        return item
 
     def local_lock_item(self, entry, nested=False):
         """As 4D writes a local component (C6ctl, R3, R5, R8, R9). Its declarations are written as declared,
@@ -1017,6 +1241,9 @@ class Manager:
             if entry.get("github") and entry.get("tag") and not entry.get("error") and name not in env_entries:
                 kept = {k: v for k, v in (deps.get(name) or {}).items() if k not in ("version", "tag", "github")}
                 deps[name] = {"github": entry["github"], "tag": entry["tag"], **kept}
+            elif entry.get("gitlab") and entry.get("tag") and not entry.get("error") and name not in env_entries:
+                kept = {k: v for k, v in (deps.get(name) or {}).items() if k not in ("version", "tag", "gitlab")}
+                deps[name] = {"gitlab": entry["gitlab"], "tag": entry["tag"], **kept}
         original["dependencies"] = deps
         write_json(target, original, indent=2)
         github_env = [n for n, s in env_entries.items() if isinstance(s, dict) and s.get("github")]
