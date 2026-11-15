@@ -1,0 +1,26 @@
+title: 4D dependencies action
+description: >-
+  A functional clone of the 4D dependency manager for CI. It resolves and installs the components that a 4D project
+  declares, so tool4d can load them on GitHub-hosted runners.
+baseurl: /4D
+repository: miyako/4D
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+  toc_levels: 2..3
+nav:
+  - title: Overview
+    url: /
+  - title: Features
+    url: /features/
+  - title: Tutorial
+    url: /tutorial/
+  - title: Technical details
+    url: /technical/
+  - title: Parity with 4D
+    url: /parity/
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - vendor

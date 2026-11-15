@@ -1,0 +1,91 @@
+name: dependencies action
+
+on:
+  push:
+    paths:
+      - .github/actions/dependencies/**
+      - .github/workflows/dependencies-action.yml
+  pull_request:
+    paths:
+      - .github/actions/dependencies/**
+      - .github/workflows/dependencies-action.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.12"]
+        include:
+          - os: ubuntu-latest
+            python: "3.10"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit tests
+        working-directory: .github/actions/dependencies
+        run: python -m unittest discover -s tests -v
+
+  tool4d:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macos
+          - os: windows-latest
+            platform: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Download tool4d
+        id: tool4d
+        uses: ./.github/actions/tool4d-download
+        with:
+          platform: ${{ matrix.platform }}
+          branch: 21.x
+          version: "21.0"
+          build: latest
+          arch: arm
+      - name: Copy the probe package
+        shell: bash
+        run: cp -R .github/actions/dependencies/tests/fixtures/Probe "$RUNNER_TEMP/Probe"
+      - name: Fetch dependencies
+        id: dependencies
+        uses: ./.github/actions/dependencies
+        with:
+          project: ${{ runner.temp }}/Probe
+          runtime-path: ${{ steps.tool4d.outputs.tool4d_executable_path }}
+          home: ${{ runner.temp }}/home
+          archive-store: ${{ runner.temp }}/archives
+          rewrite: ${{ runner.temp }}/Probe
+          github-token: ${{ github.token }}
+      - name: Load the components in tool4d
+        shell: bash
+        env:
+          REPORT: ${{ steps.dependencies.outputs.report-file }}
+          TOOL4D: ${{ steps.tool4d.outputs.tool4d_executable_path }}
+        run: |
+          cat "$REPORT"
+          python .github/actions/dependencies/tests/smoke.py "$REPORT" "$TOOL4D" "$RUNNER_TEMP/Probe" \
+            hash tcp workers "4D Widgets" "4D SVG"
+      - name: Re-run offline from the archive store
+        uses: ./.github/actions/dependencies
+        with:
+          project: ${{ runner.temp }}/Probe
+          runtime-path: ${{ steps.tool4d.outputs.tool4d_executable_path }}
+          home: ${{ runner.temp }}/home-offline
+          archive-store: ${{ runner.temp }}/archives
+          offline: "true"
+          write-lock: "false"

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if page.title %}{{ page.title }} · {% endif %}{{ site.title }}</title>
+  <meta name="description" content="{{ page.description | default: site.description | strip | escape }}">
+  <link rel="stylesheet" href="{{ '/assets/style.css' | relative_url }}">
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="{{ '/' | relative_url }}">4D dependencies action</a>
+      <nav aria-label="Site">
+        {% for item in site.nav %}
+        <a href="{{ item.url | relative_url }}"{% if page.url == item.url %} aria-current="page"{% endif %}>{{ item.title }}</a>
+        {% endfor %}
+        <a href="https://github.com/{{ site.repository }}/tree/v1/.github/actions/dependencies">Source</a>
+      </nav>
+    </div>
+  </header>
+  <main class="wrap">
+    {% if page.title %}<h1>{{ page.title }}</h1>{% endif %}
+    {% if page.lead %}<p class="lead">{{ page.lead }}</p>{% endif %}
+    {{ content }}
+  </main>
+  <footer class="site-footer">
+    <div class="wrap">
+      Part of <a href="https://github.com/{{ site.repository }}">{{ site.repository }}</a>.
+      The behaviour described here was established against real 4D; see <a href="{{ '/parity/' | relative_url }}">Parity with 4D</a>.
+    </div>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{"dependencies":{
+ "hash":{"github":"miyako/hash","version":"20.0.1"},
+ "tcp":{"github":"miyako/tcp"},
+ "workers":{"github":"miyako/workers","version":"^20.0.0"},
+ "4D Widgets":{"github":"4d/4D-Widgets","version":"4d"}
+}}
