@@ -1,6 +1,6 @@
 name: 4D dependencies
 description: >-
-  Emulate the 4D dependency manager. Resolves GitHub dependencies declared in
+  Emulate the 4D dependency manager. Resolves GitHub and GitLab dependencies declared in
   dependencies.json and environment4d.json, then installs them in the 4D cache
   layout so tool4d, 4D or 4D Server can load them.
 inputs:

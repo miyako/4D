@@ -7,6 +7,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+import urllib.parse
 import zipfile
 from pathlib import Path
 from unittest import mock
@@ -738,6 +739,146 @@ class Manager(Base):
         self.declare({"a": {"github": "o/a", "tag": "1.0.0"}})
         report = self.run_manager(self.http_error_client(401), "--no-write-lock")
         self.assertEqual([i["name"] for i in report["incomplete"]], ["a"])
+
+
+class FakeGitLab(fd.GitLab):
+    """Serves GitLab releases from memory: (tag, released order, [(link name, url)]); downloads by URL."""
+
+    def __init__(self, host="https://gitlab.com", releases=None, files=None, children=None):
+        super().__init__(host)
+        self.data = releases or []  # newest first, as the API lists them
+        self.files = files or {}  # url -> bytes
+        self.children = children or {}
+        self.calls = []
+
+    def _release(self, repo, tag, links):
+        return {"tag_name": tag, "upcoming_release": False, "assets": {"links": [
+            {"id": i, "name": name, "url": url, "direct_asset_url": url} for i, (name, url) in enumerate(links)]}}
+
+    def json(self, url):
+        self.calls.append(url)
+        repo = urllib.parse.unquote(url.split("/projects/")[1].split("/")[0])
+        if "/releases/permalink/latest" in url:
+            tag, links = self.data[0]
+            return self._release(repo, tag, links)
+        if "/releases/" in url:
+            tag = urllib.parse.unquote(url.rsplit("/", 1)[1])
+            for t, links in self.data:
+                if t == tag:
+                    return self._release(repo, t, links)
+            raise LookupError(url)
+        return [self._release(repo, t, links) for t, links in self.data] if "page=1" in url else []
+
+    def child_dependencies(self, repo, tag):
+        return self.children.get((repo, tag))
+
+    def download(self, asset):
+        self.calls.append("download " + asset["url"])
+        return self.files[asset["url"]]
+
+
+class GitLabSupport(Base):
+    # Mirrors the real-4D cases GL1-GL8 and H1-H7 (4D 21 R5, miyako-group/wavplay).
+    A, B = "https://example.org/a/wavplay.zip", "https://example.org/b/wavplay.zip"
+
+    def gitlab(self, host="https://gitlab.com", releases=None):
+        files = {self.A: component_zip("wavplay"), self.B: component_zip("wavplay")}
+        # newest first: 20.1.0 was released last, 20.2.0 is the highest and has two links
+        releases = releases or [("20.1.0", [("wavplay.zip", self.A)]),
+                                ("20.2.0", [("wavplay.zip", self.A), ("component.zip", self.B)]),
+                                ("20.0.0", [("wavplay-21.0.3.zip", self.A)])]
+        made = {}
+
+        def factory(base):
+            made[base] = FakeGitLab(base, releases, files)
+            return made[base]
+        return factory, made
+
+    def run_gitlab(self, spec, version="21R5", releases=None, *extra):
+        self.declare({"wavplay": {"gitlab": "miyako-group/wavplay", **spec}})
+        factory, made = self.gitlab(releases=releases)
+        argv = ["--project", str(self.pkg), "--user", "u", "--home", str(self.tmp / "home"),
+                "--archive-store", str(self.tmp / "store"), "--runtime", "4D", *extra]
+        if version:
+            argv += ["--runtime-version", version]
+        args = fd.parser().parse_args(argv)
+        args.runtime = fd.RUNTIMES[args.runtime.lower()]
+        report = fd.Manager(args, FakeGitHub(Manager.repos(self)), gitlab=factory).run()
+        lock = json.loads((self.pkg / "userPreferences.u/dependencies-lock.json").read_text())["dependencies"]
+        return report, lock["wavplay"], made
+
+    def test_versions_resolve_as_in_4d(self):
+        cases = {  # H1-H7
+            "H1": ({}, "20.2.0", "highest"), "H2": ({"version": "highest"}, "20.2.0", "highest"),
+            "H3": ({"version": "latest"}, "20.1.0", "latest"), "H4": ({"version": "^20.0.0"}, "20.2.0", "^20.0.0"),
+            "H5": ({"tag": "20.2.0"}, "20.2.0", None), "H6": ({"version": "4d"}, "20.2.0", "4D:21R5"),
+            "H7": ({"version": "20.1.0"}, "20.1.0", "20.1.0"),
+        }
+        for case, (spec, tag, version) in cases.items():
+            with self.subTest(case=case):
+                for state in (self.pkg / "userPreferences.u", self.tmp / "home", self.tmp / "store"):
+                    shutil.rmtree(state, ignore_errors=True)
+                report, item, _ = self.run_gitlab(spec)
+                self.assertEqual(report["incomplete"], [])
+                self.assertEqual((item["tag"], item.get("version")), (tag, version))
+                self.assertEqual(item["archiveURL"], self.A)
+
+    def test_cache_metadata_and_lock_are_written_as_4d_writes_them(self):
+        report, item, _ = self.run_gitlab({"tag": "20.0.0"})  # GL1
+        folder = Path(report["dependenciesFolder"]) / ".gitlab/miyako-group/wavplay"
+        self.assertTrue((folder / "20.0.0/Project/wavplay.4DProject").is_file())
+        meta = json.loads((folder / "20.0.0.json").read_text())
+        self.assertEqual(list(meta), ["tag", "htmlURL", "archiveURL", "archiveSize", "dependencies", "gitlab", "host"])
+        self.assertEqual((meta["htmlURL"], meta["host"], meta["dependencies"]),
+                         ("/miyako-group/wavplay/-/tags/20.0.0", None, None))
+        self.assertEqual(set(item), {"gitlab", "tag", "htmlURL", "archiveURL", "path", "found", "loaded"})
+        self.assertTrue(item["found"])
+
+    def test_a_declared_host_is_kept_and_named_in_the_cache_path(self):
+        report, item, made = self.run_gitlab({"host": "https://gitlab.com", "tag": "20.0.0"})  # GL8
+        self.assertEqual(item["host"], "https://gitlab.com")
+        self.assertTrue((Path(report["dependenciesFolder"]) / ".gitlab/gitlab.com/miyako-group/wavplay/20.0.0").is_dir())
+        self.assertEqual(list(made), ["https://gitlab.com"])
+
+    def test_a_missing_release_links_to_the_releases_page(self):
+        report, item, _ = self.run_gitlab({"tag": "9.9.9"})  # GL7
+        self.assertEqual([i["name"] for i in report["incomplete"]], ["wavplay"])
+        self.assertEqual((item["htmlURL"], item["archiveURL"], item["found"]),
+                         ("https://gitlab.com/miyako-group/wavplay/-/releases/", "", False))
+        self.assertNotIn("tag", item)
+
+    def test_several_links_without_one_named_after_the_project_fail_explicitly(self):
+        releases = [("20.0.0", [("a.zip", self.A), ("b.zip", self.B)])]
+        report, _, _ = self.run_gitlab({"tag": "20.0.0"}, "21R5", releases)
+        self.assertIn("has not been observed", report["incomplete"][0]["reason"])
+
+    def test_gitlab_needs_4d_21_r3_or_later(self):
+        for version, ok in (("21.2", False), ("21.1", False), ("21R3", True), ("21R5", True), ("20.8", False)):
+            with self.subTest(version=version):
+                for state in (self.pkg / "userPreferences.u", self.tmp / "home", self.tmp / "store"):
+                    shutil.rmtree(state, ignore_errors=True)
+                report, item, made = self.run_gitlab({"tag": "20.0.0"}, version)
+                self.assertEqual(report["incomplete"] == [], ok)
+                if not ok:
+                    self.assertEqual(made, {})  # no request is made
+                    self.assertFalse(item["found"])
+        report, _, _ = self.run_gitlab({"tag": "20.0.0"}, None)
+        self.assertEqual(report["incomplete"], [])
+        self.assertIn("21 R3", report["warnings"][0])
+
+    def test_pins_and_offline_runs_use_the_archive_store(self):
+        self.run_gitlab({})
+        self.declare({"wavplay": {"gitlab": "miyako-group/wavplay"}})
+        args = fd.parser().parse_args(["--project", str(self.pkg), "--user", "u", "--home", str(self.tmp / "home2"),
+                                       "--archive-store", str(self.tmp / "store"), "--runtime", "4D",
+                                       "--runtime-version", "21R5", "--offline"])
+        args.runtime = fd.RUNTIMES[args.runtime.lower()]
+        offline = FakeGitLab()
+        offline.offline = True
+        report = fd.Manager(args, FakeGitHub(Manager.repos(self), offline=True), gitlab=lambda base: offline).run()
+        self.assertEqual((report["resolved"], report["incomplete"]), ({"wavplay": "20.2.0"}, []))
+        self.assertEqual(report["dependencies"]["wavplay"]["source"], "archive")
+        self.assertFalse([c for c in offline.calls if c.startswith("download")])
 
 
 class Policy(unittest.TestCase):

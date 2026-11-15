@@ -45,6 +45,7 @@ in [miyako/4d-static-analysis#4](https://github.com/miyako/4d-static-analysis/is
 | Local entries in the lock file; missing ones are `path ""` | C6ctl, R3, R5, R8, R9 |
 | An empty `{}` declaration is not looked up next to the package | D1 (local) |
 | Dependency cycles load every component once | Y1–Y4 |
+| GitLab: supported from 21 R3, not in 21.x; `highest` default; `latest` is the most recent release; links; cache and lock format | GL1–GL8, H1–H7 |
 | Pins reused while the declaration is unchanged; `update` ignores them | D11, D12, W9, W11 |
 | Offline: a range or `latest` without a pin fails | D10 |
 | Old tags are never removed | D9 |
@@ -66,6 +67,7 @@ in [miyako/4d-static-analysis#4](https://github.com/miyako/4d-static-analysis/is
 | L, F, T, V, E, A | Two components declaring one dependency with `latest`, `"4d"`, tags, ranges and exact versions |
 | G, M | Ranges with no common release; three differing declarations |
 | Y | Dependency cycles |
+| GL, H | GitLab components, against [miyako-group/wavplay](https://gitlab.com/miyako-group/wavplay) on 4D 21.1, 21.2 and 21 R3–R5 |
 
 ## Not yet observed
 
@@ -73,7 +75,8 @@ These are handled conservatively, never guessed:
 
 | Situation | What the emulator does |
 | --- | --- |
-| GitLab components | Reports them incomplete |
+| Private GitLab projects (tokens) | Reports them incomplete |
+| A GitLab component's own dependencies, upcoming GitLab releases, and several links without a `<project>.zip` | Root manifest read; upcoming skipped; reported incomplete |
 | A `path` declared inside a GitHub component | Leaves it unresolved, with a warning |
 | A malformed `dependencies.json` or `environment4d.json` | Stops the run |
 | A cycle that passes through GitHub releases | Resolves it like a local cycle (Y1–Y4); not tested with releases |

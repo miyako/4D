@@ -34,7 +34,8 @@ Each rule below follows what real 4D does. The evidence IDs refer to experiments
 21.2 and tool4d 21.0 on macOS, and 4D 21.0 (build 100434) and tool4d on Windows. The Windows real-4D cases W1–W15 are
 recorded in [4d-static-analysis#4](https://github.com/miyako/4d-static-analysis/issues/4). Cases C4–C6 were run against 4D 21.2 (build 100653)
 and 4D 21R5 (build 100156) on macOS, headless with an isolated home folder; cases R1–R8 against 4D 21.2 in the same
-way. Both are recorded in [#5](https://github.com/miyako/4D/pull/5) and [#6](https://github.com/miyako/4D/issues/6). The
+way. The GitLab cases GL1–GL8 and H1–H7 ran against 4D 21 R5 (and GL1 against 21.1, 21.2, 21 R3 and 21 R4) with the public
+project [miyako-group/wavplay](https://gitlab.com/miyako-group/wavplay). Both are recorded in [#5](https://github.com/miyako/4D/pull/5) and [#6](https://github.com/miyako/4D/issues/6). The
 combination cases L1–L5, F1–F7, T1–T4, V1, V2, E1, A1 and A2 (two local components declaring the same GitHub dependency
 differently) were run against 4D 21.2 in the same way and are recorded in [#8](https://github.com/miyako/4D/pull/8); G1–G3 and
 M1–M5 (no common release, three declarations) likewise, recorded in [#9](https://github.com/miyako/4D/pull/9); the cycle cases
@@ -66,6 +67,10 @@ Y1–Y4 likewise.
 | `environment4d.json` in the package folder or a parent folder overrides the names that `dependencies.json` declares. A name declared only in `environment4d.json` is neither fetched nor loaded; it is ignored with a warning. | 4D docs, D17, C4a–C4d |
 | A rejected token (401, or 403 such as SAML enforcement) fails without an anonymous retry. Without release metadata the lock entry has no `tag` and empty `htmlURL`/`archiveURL`. | D15, W15 |
 | A cached tag folder that is no longer a package (for example, its `.4DZ` was deleted) is not loaded and not repaired. The lock keeps the cached `tag` and URLs with `path: ""` and `found: false`, and the dependency is incomplete. | D5, W5 |
+| GitLab components (`"gitlab": "group/project"`, optional `"host"`) are loaded by 4D 21 R3, 21 R4 and 21 R5, but not by 4D 21.1 or 21.2. For a 21.x runtime they are reported incomplete; for versions not observed they are incomplete too, except 22 and later, which only warn. | GL1, GL1 on 21.1/21 R3/21 R4 |
+| For GitLab, no `version` means `highest`, the highest semantic version. `latest` is GitLab's latest release, the most recently released, which can differ. Ranges, exact versions and `"4d"` work as for GitHub. | GL2–GL6, H1–H7 |
+| GitLab release assets are links. A single link is used whatever its name; with several, the one named `<project>.zip`. Several links without such a name are reported incomplete: 4D's choice has not been observed. | GL1, H5 |
+| GitLab components are cached in `.gitlab/<group>/<project>/<tag>/`, or `.gitlab/<host>/<group>/<project>/<tag>/` when `host` is declared, with `<tag>.json` holding `tag`, `htmlURL` (relative), `archiveURL`, `archiveSize`, `dependencies`, `gitlab` and `host`. Lock entries carry `gitlab`, `host` when declared, `version`, `tag`, `htmlURL` and `archiveURL`. A missing release links to the project's releases page with an empty `archiveURL`. | GL1, GL7, GL8 |
 | tool4d loads exact `tag` entries only and does not recurse, hence `rewrite`. | E-series |
 | tool4d honours `HOME`/`CFFIXED_USER_HOME` (macOS) and `USERPROFILE`, `LOCALAPPDATA` and `APPDATA` together (Windows; both AppData folders must exist or tool4d quits without loading). Real 4D on Windows ignores these overrides. | E-series, W1, W6, debug run 43464410687 |
 
@@ -74,7 +79,10 @@ The lock file matches 4D's top-level entries, which hold the pins, with three kn
 nested inside an entry are written as declared, while 4D sometimes expands them (resolved `path`, `loaded`, `found`, and
 `htmlURL`/`path` on GitHub children; Y1–Y4). 4D rewrites the lock on every launch; the nested part is informational.
 
-GitLab dependencies are reported as incomplete. Local-path dependencies are reported with `source: local` and the
+GitLab support covers public projects only: how 4D stores and sends a GitLab token has not been observed, so private
+GitLab projects are reported incomplete. Upcoming GitLab releases (a future release date) are skipped, and a GitLab
+component's own `Project/Sources/dependencies.json` is read at the repository root; neither has been checked against
+4D yet. Local-path dependencies are reported with `source: local` and the
 resolved `path`, and their GitHub dependencies are installed, but the local components themselves are left to the
 caller: they are not copied, and one that is missing is only a warning. A local component's `dependencies.json` that
 cannot be parsed, or has the wrong shape, makes it incomplete.
