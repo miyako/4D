@@ -297,11 +297,12 @@ class Manager(Base):
         original = json.loads((self.pkg / "Project/Sources/dependencies.json").read_text())
         self.assertEqual(original["dependencies"]["a"]["version"], "^1.0.0")
 
-    def test_gitlab_and_missing_repo(self):
+    def test_gitlab_on_a_21x_runtime_and_missing_repo(self):
+        # 4D 21.x (including tool4d 21.0) does not load GitLab components; no request is made for them.
         self.declare({"g": {"gitlab": "x/y"}, "m": {"github": "o/missing"}})
-        report = self.run_manager(FakeGitHub(self.repos()))
+        report = self.run_manager(FakeGitHub(self.repos()), "--runtime-version", "21.2")
         reasons = {i["name"]: i["reason"] for i in report["incomplete"]}
-        self.assertIn("GitLab", reasons["g"])
+        self.assertIn("does not load GitLab components", reasons["g"])
         self.assertIn("token may be required", reasons["m"])
 
     # -- manifests (M8 gaps 1 and 2)
@@ -847,10 +848,33 @@ class GitLabSupport(Base):
                          ("https://gitlab.com/miyako-group/wavplay/-/releases/", "", False))
         self.assertNotIn("tag", item)
 
-    def test_several_links_without_one_named_after_the_project_fail_explicitly(self):
-        releases = [("20.0.0", [("a.zip", self.A), ("b.zip", self.B)])]
-        report, _, _ = self.run_gitlab({"tag": "20.0.0"}, "21R5", releases)
-        self.assertIn("has not been observed", report["incomplete"][0]["reason"])
+    def test_with_several_links_the_first_listed_is_used(self):
+        # K1t: 20.0.5 lists component.zip (added last) before wavplay.zip; 4D used component.zip.
+        releases = [("20.0.5", [("component.zip", self.B), ("wavplay.zip", self.A)])]
+        report, item, _ = self.run_gitlab({"tag": "20.0.5"}, "21R5", releases)
+        self.assertEqual((report["incomplete"], item["archiveURL"]), ([], self.B))
+
+    def test_the_gitlab_token_goes_to_the_gitlab_host_only(self):
+        client = fd.GitLab("https://gitlab.com", token="secret")
+        self.assertEqual(client.headers("https://gitlab.com/api/v4/projects/x", "application/json")["PRIVATE-TOKEN"],
+                         "secret")
+        self.assertNotIn("PRIVATE-TOKEN", client.headers("https://github.com/o/r/releases/download/1/r.zip", "*/*"))
+        self.assertNotIn("PRIVATE-TOKEN", client.headers("https://gitlab.com.evil.example/x", "*/*"))
+        # gitlab.json holds one token and no host: a self-hosted host does not receive it.
+        args = fd.parser().parse_args(["--project", str(self.pkg), "--user", "u"])
+        args.runtime = fd.RUNTIMES[args.runtime.lower()]
+        manager = fd.Manager(args, FakeGitHub(Manager.repos(self)), gitlab_token="secret")
+        self.assertEqual(manager.gitlab_factory("https://gitlab.com").token, "secret")
+        self.assertIsNone(manager.gitlab_factory("https://gitlab.example.com").token)
+
+    def test_the_gitlab_token_file_is_read_like_4ds_gitlab_json(self):
+        token_file = self.tmp / "gitlab.json"
+        token_file.write_text(json.dumps({"token": "secret"}))
+        args = fd.parser().parse_args(["--project", str(self.pkg), "--gitlab-token-file", str(token_file)])
+        self.assertEqual(fd.read_gitlab_token(args), "secret")
+        with mock.patch.dict(os.environ, {"DEPENDENCIES_GITLAB_TOKEN": "from-env"}):
+            args = fd.parser().parse_args(["--project", str(self.pkg)])
+            self.assertEqual(fd.read_gitlab_token(args), "from-env")
 
     def test_gitlab_needs_4d_21_r3_or_later(self):
         for version, ok in (("21.2", False), ("21.1", False), ("21R3", True), ("21R5", True), ("20.8", False)):

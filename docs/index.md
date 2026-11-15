@@ -81,7 +81,7 @@ case tested. Most cases ran on 4D 21.2 and 21 R5 on macOS; earlier ones also cov
 [Parity with 4D]({{ '/parity/' | relative_url }}) lists the cases.
 
 **GitLab:** public GitLab components are supported for 4D 21 R3 and later, as in 4D, which doesn't load them in 21.1 or
-21.2. Private GitLab projects aren't supported yet. **Not yet observed in 4D:** a local `path` declared inside a GitHub
+21.2. Private gitlab.com projects work with a token. **Not yet observed in 4D:** a local `path` declared inside a GitHub
 component. Both are reported as incomplete or with a warning, never guessed.
 
 Requirements: Python 3.10 or later on the runner (only the standard library is used), and components published as

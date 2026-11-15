@@ -69,7 +69,9 @@ Y1–Y4 likewise.
 | A cached tag folder that is no longer a package (for example, its `.4DZ` was deleted) is not loaded and not repaired. The lock keeps the cached `tag` and URLs with `path: ""` and `found: false`, and the dependency is incomplete. | D5, W5 |
 | GitLab components (`"gitlab": "group/project"`, optional `"host"`) are loaded by 4D 21 R3, 21 R4 and 21 R5, but not by 4D 21.1 or 21.2. For a 21.x runtime they are reported incomplete; for versions not observed they are incomplete too, except 22 and later, which only warn. | GL1, GL1 on 21.1/21 R3/21 R4 |
 | For GitLab, no `version` means `highest`, the highest semantic version. `latest` is GitLab's latest release, the most recently released, which can differ. Ranges, exact versions and `"4d"` work as for GitHub. | GL2–GL6, H1–H7 |
-| GitLab release assets are links. A single link is used whatever its name; with several, the one named `<project>.zip`. Several links without such a name are reported incomplete: 4D's choice has not been observed. | GL1, H5 |
+| GitLab release assets are links, used whatever their name. With several, 4D takes the first one the GitLab API lists (the most recently added), even when another is named `<project>.zip`. | GL1, H5, K1t, M1t |
+| 4D reads a GitLab token from `gitlab.json` (`{"token": …}`) in its active folder (`~/Library/Application Support/4D` on macOS, `%APPDATA%\4D` on Windows) and uses it. Here it comes from `gitlab-token` or `DEPENDENCIES_GITLAB_TOKEN`, or `--gitlab-token-file` for a `gitlab.json`, and is sent to gitlab.com only. | K1t–K3t |
+| A GitLab component's `dependencies.json` inside a subfolder of the repository is not read; 4D writes `dependencies: null`. A root `Project/Sources/dependencies.json` is read, as for GitHub, but that case has not been observed. | M1t |
 | GitLab components are cached in `.gitlab/<group>/<project>/<tag>/`, or `.gitlab/<host>/<group>/<project>/<tag>/` when `host` is declared, with `<tag>.json` holding `tag`, `htmlURL` (relative), `archiveURL`, `archiveSize`, `dependencies`, `gitlab` and `host`. Lock entries carry `gitlab`, `host` when declared, `version`, `tag`, `htmlURL` and `archiveURL`. A missing release links to the project's releases page with an empty `archiveURL`. | GL1, GL7, GL8 |
 | tool4d loads exact `tag` entries only and does not recurse, hence `rewrite`. | E-series |
 | tool4d honours `HOME`/`CFFIXED_USER_HOME` (macOS) and `USERPROFILE`, `LOCALAPPDATA` and `APPDATA` together (Windows; both AppData folders must exist or tool4d quits without loading). Real 4D on Windows ignores these overrides. | E-series, W1, W6, debug run 43464410687 |
@@ -79,10 +81,10 @@ The lock file matches 4D's top-level entries, which hold the pins, with three kn
 nested inside an entry are written as declared, while 4D sometimes expands them (resolved `path`, `loaded`, `found`, and
 `htmlURL`/`path` on GitHub children; Y1–Y4). 4D rewrites the lock on every launch; the nested part is informational.
 
-GitLab support covers public projects only: how 4D stores and sends a GitLab token has not been observed, so private
-GitLab projects are reported incomplete. Upcoming GitLab releases (a future release date) are skipped, and a GitLab
-component's own `Project/Sources/dependencies.json` is read at the repository root; neither has been checked against
-4D yet. Local-path dependencies are reported with `source: local` and the
+A GitLab token is sent to gitlab.com only: 4D's `gitlab.json` holds one token without a host, and whether 4D also sends
+it to a self-hosted `host` has not been observed. Upcoming GitLab releases (a future release date) are skipped; that has
+not been checked against 4D yet. Unauthenticated gitlab.com requests are rate-limited per IP address (HTTP 429), so CI
+that fetches GitLab components should pass a token. Local-path dependencies are reported with `source: local` and the
 resolved `path`, and their GitHub dependencies are installed, but the local components themselves are left to the
 caller: they are not copied, and one that is missing is only a warning. A local component's `dependencies.json` that
 cannot be parsed, or has the wrong shape, makes it incomplete.

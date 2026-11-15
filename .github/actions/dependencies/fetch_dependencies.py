@@ -31,6 +31,8 @@ API = "https://api.github.com"
 USER_AGENT = "miyako-4d-dependencies"
 RUNTIMES = {"tool4d": "tool4d", "4d": "4D", "4d server": "4D Server"}
 TOKEN_ENV = "DEPENDENCIES_GITHUB_TOKEN"
+GITLAB_TOKEN_ENV = "DEPENDENCIES_GITLAB_TOKEN"
+GITLAB_COM = "https://gitlab.com"
 UNVERIFIED_REUSE = "unverified (4D-equivalent)"
 MAX_ARCHIVE = 1 << 30
 MAX_EXTRACTED = 2 << 30
@@ -354,20 +356,26 @@ class GitLab(GitHub):
 
     A release's assets are links, not uploads: the component zip lives elsewhere (GitLab's package registry or
     another server) and the link points to it. GitLab exposes no digest or size, so a download is verified only
-    against the archive store's own record. Tokens for private projects are not supported yet: how 4D stores and
-    sends a GitLab token has not been observed."""
+    against the archive store's own record.
+
+    4D reads a GitLab token from gitlab.json ({"token": ...}) in its active folder and uses it (K1t-K3t). Here the
+    token is sent only to the GitLab host itself, never to a link that points elsewhere."""
 
     NAME = "GitLab"
 
-    def __init__(self, host="https://gitlab.com", offline=False, attempts=4):
-        super().__init__(None, offline, attempts)
+    def __init__(self, host=GITLAB_COM, token=None, offline=False, attempts=4):
+        super().__init__(token, offline, attempts)
         self.host = host.rstrip("/")
+        self.host_name = urllib.parse.urlsplit(self.host).hostname
 
     def headers(self, url: str, accept: str) -> dict:
-        return {"Accept": accept, "User-Agent": USER_AGENT}
+        headers = {"Accept": accept, "User-Agent": USER_AGENT}
+        if self.token and urllib.parse.urlsplit(url).hostname == self.host_name:
+            headers["PRIVATE-TOKEN"] = self.token
+        return headers
 
     def _hint(self):
-        return " (private GitLab projects are not supported yet)"
+        return "" if self.token else f" (a token may be required for private projects: {GITLAB_TOKEN_ENV})"
 
     def _api(self, repo: str, rest: str = "") -> str:
         return f"{self.host}/api/v4/projects/{urllib.parse.quote(repo, safe='')}{rest}"
@@ -672,10 +680,14 @@ def component_override(package: Path, name: str):
 # ---------------------------------------------------------------- manager
 
 class Manager:
-    def __init__(self, args, client: GitHub, gitlab=None):
+    def __init__(self, args, client: GitHub, gitlab=None, gitlab_token=None):
         self.args = args
         self.client = client
-        self.gitlab_factory = gitlab or (lambda host: GitLab(host, offline=client.offline))
+        self.gitlab_token = gitlab_token
+        # 4D's gitlab.json holds one token and no host: it is sent to gitlab.com only. Whether 4D also sends it to
+        # a self-hosted `host` has not been observed.
+        self.gitlab_factory = gitlab or (lambda host: GitLab(host, token=gitlab_token if host == GITLAB_COM else None,
+                                                             offline=client.offline))
         self.gitlab_clients = {}
         self.runtime = args.runtime
         self.anchor, self.version_code = runtime_anchor(args.runtime_version) if args.runtime_version else (None, None)
@@ -1076,18 +1088,12 @@ class Manager:
         assets = release.get("assets") or []
         name = src.repo.split("/")[-1] + ".zip"
         if src.gitlab:
-            # GitLab assets are links. A single link is used whatever its name (GL1: "wavplay-21.0.3.zip");
-            # with several, 4D used the one named after the project (H5), which here was also listed first.
-            named = [a for a in assets if a.get("name") == name]
-            if len(assets) == 1:
-                return assets[0]
-            if len(named) == 1:
-                return named[0]
+            # GitLab assets are links, used whatever their name (GL1). With several, 4D takes the first one the API
+            # lists, the most recently added, even when another is named after the project (K1t; H5 agrees).
             if not assets:
                 raise Failure(f"cannot determine the archive URL of GitLab release {release.get('tag_name')} "
                               f"of {src.repo}: the release has no asset link")
-            raise Failure(f"GitLab release {release.get('tag_name')} of {src.repo} has {len(assets)} asset links and "
-                          f"none named {name}; how 4D chooses between them has not been observed")
+            return assets[0]
         asset = next((a for a in assets if a.get("name") == name), None)
         if not asset:
             raise Failure(f"release {release.get('tag_name')} of {src.repo} has no {name} asset")
@@ -1271,7 +1277,7 @@ class Manager:
             "archiveStore": str(self.archive_store) if self.archive_store else None,
             "lockFile": None if self.args.no_write_lock else str(self.lock_path),
             "environment4d": str(environment) if environment else None,
-            "token": bool(self.client.token), "offline": self.client.offline,
+            "token": bool(self.client.token), "gitlabToken": bool(self.gitlab_token), "offline": self.client.offline,
             "resolved": {n: e["tag"] for n, e in sorted(self.results.items()) if e.get("tag") and not e.get("error")},
             "dependencies": self.results, "incomplete": self.incomplete, "warnings": self.warnings,
         }
@@ -1295,6 +1301,12 @@ def enforce_runner_policy(runtime: str) -> None:
             and runtime != "tool4d"):
         raise UsageError(f"runtime {runtime!r} is only allowed on self-hosted runners; "
                          "GitHub-hosted runners must use tool4d")
+
+
+def read_gitlab_token(args):
+    if args.gitlab_token_file:
+        return (load_json(Path(args.gitlab_token_file)) or {}).get("token") or None
+    return os.environ.get(GITLAB_TOKEN_ENV) or None
 
 
 def read_token(args):
@@ -1327,6 +1339,8 @@ def parser():
     p.add_argument("--dependencies-folder", help="explicit Dependencies folder (overrides the --home location)")
     p.add_argument("--archive-store", help="verified archive store; 'none' disables it (default: on with --home)")
     p.add_argument("--token-file", help=f"JSON {{\"token\": ...}} like 4D's github.json; otherwise ${TOKEN_ENV}")
+    p.add_argument("--gitlab-token-file",
+                   help=f"JSON {{\"token\": ...}} like 4D's gitlab.json; otherwise ${GITLAB_TOKEN_ENV} (gitlab.com only)")
     p.add_argument("--update", action="store_true", help="ignore tags pinned in dependencies-lock.json")
     p.add_argument("--offline", action="store_true", help="no network: cached or archived tags only")
     p.add_argument("--no-write-lock", action="store_true", help="do not write dependencies-lock.json")
@@ -1371,7 +1385,8 @@ def main(argv=None) -> int:
                              "isolate them; run the self-hosted runner as a dedicated user instead")
         if not args.runtime_version and args.runtime_path:
             args.runtime_version = detect_version(args.runtime_path)
-        report = Manager(args, GitHub(read_token(args), offline=args.offline)).run()
+        report = Manager(args, GitHub(read_token(args), offline=args.offline),
+                         gitlab_token=read_gitlab_token(args)).run()
     except UsageError as error:
         print(f"fetch_dependencies: {error}", file=sys.stderr)
         return 2
