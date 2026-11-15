@@ -736,6 +736,20 @@ class Manager(Base):
         self.assertEqual(report["dependencies"]["a"]["source"], "archive")
         self.assertIn("HTTP 503", report["warnings"][0])
 
+    def test_a_long_retry_after_fails_at_once(self):
+        client = fd.GitLab("https://gitlab.com")
+        client.attempts = 4
+
+        def fake_open(request, timeout):
+            raise fd.urllib.error.HTTPError(request.full_url, 429, "x", {"Retry-After": "911"}, None)
+        client.opener = mock.Mock(open=fake_open)
+        with mock.patch.object(fd.time, "sleep") as sleep:
+            with self.assertRaises(fd.Failure) as raised:
+                client.json("https://gitlab.com/api/v4/projects/x/releases")
+        sleep.assert_not_called()
+        self.assertIn("rate limit (HTTP 429)", str(raised.exception))
+        self.assertIn("token", str(raised.exception))
+
     def test_rejected_token_without_stored_archive_is_incomplete(self):
         self.declare({"a": {"github": "o/a", "tag": "1.0.0"}})
         report = self.run_manager(self.http_error_client(401), "--no-write-lock")
